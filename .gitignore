@@ -1,0 +1,23 @@
+# Node dependencies
+node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+
+# Environment variables
+.env
+
+# IDE settings
+.vscode/
+
+# Vector database storage
+qdrant_storage/
+
+#app output
+
+app/output/
+
