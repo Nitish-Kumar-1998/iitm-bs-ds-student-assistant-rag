@@ -44,6 +44,8 @@ from sentence_transformers import SentenceTransformer
 from config import (
     QDRANT_HOST,
     QDRANT_PORT,
+    QDRANT_URL,
+    QDRANT_API_KEY,
     QDRANT_COLLECTION,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
@@ -62,7 +64,7 @@ logger = logging.getLogger("uploader")
 
 from config import ALL_CHUNKS_FILE
 EMBEDDED_FILE = ALL_CHUNKS_FILE.parent / "all_chunks_embedded.json"
-QDRANT_URL    = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
+
 BATCH_SIZE    = 100
 
 # ══════════════════════════════════════════════════════════════════
@@ -277,7 +279,7 @@ def run():
 
     # Connect to Qdrant
     print(f"\n  Connecting to Qdrant at {QDRANT_URL}...")
-    client = QdrantClient(url=QDRANT_URL, timeout=30)
+    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
     try:
         client.get_collections()
         print(f"  ✅ Connected to Qdrant")

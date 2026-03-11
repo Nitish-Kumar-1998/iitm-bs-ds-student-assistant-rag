@@ -43,6 +43,8 @@ from config import (
     RERANKER_TOP_K,
     QDRANT_HOST,
     QDRANT_PORT,
+    QDRANT_URL,
+    QDRANT_API_KEY,
     QDRANT_COLLECTION,
     RETRIEVAL_TOP_K,
     RERANK_TOP_K,
@@ -57,7 +59,6 @@ from config import (
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 logger = logging.getLogger("main")
 
-QDRANT_URL  = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
 MAX_HISTORY = 6
 
 # FIX 5: increased retrieval pool for wider net before reranking
@@ -165,7 +166,7 @@ reranker = CrossEncoder(RERANKER_MODEL)
 print(f"✅ Reranker loaded: {RERANKER_MODEL}")
 
 print(f"Connecting to Qdrant at {QDRANT_URL}...")
-qdrant = QdrantClient(url=QDRANT_URL, timeout=10)
+qdrant = QdrantClient(url=QDRANT_URL,api_key=QDRANT_API_KEY, timeout=10)
 print("✅ Qdrant connected")
 
 print(f"Initialising LLM client ({LLM_PROVIDER})...")

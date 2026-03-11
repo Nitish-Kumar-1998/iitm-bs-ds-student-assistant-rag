@@ -8,7 +8,7 @@ with one flag: USE_LOCAL_LLM = True/False
 Public mode  (USE_LOCAL_LLM = False) → Groq API
 Private mode (USE_LOCAL_LLM = True)  → Ollama local
 """
-
+import os
 from pathlib import Path
 from pathlib import Path
 from dotenv import load_dotenv
@@ -65,9 +65,13 @@ RERANKER_TOP_K      = 5                           # rerank top 5 candidates
 # VECTOR DB CONFIGURATION
 # ══════════════════════════════════════════════════════════════════
 
+
 QDRANT_HOST         = "localhost"
 QDRANT_PORT         = 6333
 QDRANT_COLLECTION   = "iitm_bs"
+
+QDRANT_URL          = os.getenv("QDRANT_URL", f"http://{QDRANT_HOST}:{QDRANT_PORT}")
+QDRANT_API_KEY      = os.getenv("QDRANT_API_KEY", None)
 
 # Hybrid search weights
 VECTOR_WEIGHT       = 0.7                         # semantic search weight
