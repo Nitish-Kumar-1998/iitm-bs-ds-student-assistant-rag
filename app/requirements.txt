@@ -1,14 +1,17 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 beautifulsoup4==4.14.3
 docling==2.78.0
 fastapi==0.135.1
 markdownify==1.2.2
-numpy==2.4.3
+numpy==2.2.0
 openai==2.26.0
 Pillow==12.1.1
 pydantic==2.12.5
 python-dotenv==1.2.2
 qdrant_client==1.17.0
 Requests==2.32.5
-sentence_transformers==5.2.3
+sentence_transformers==3.0.0
 tqdm==4.67.1
 uvicorn==0.41.0
+torch==2.2.0+cpu
