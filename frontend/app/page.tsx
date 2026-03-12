@@ -86,7 +86,7 @@ export default function Home() {
     try {
       // FIX: call buildHistory() here — uses ref so always current
       const history = buildHistory();
-      const res = await fetch("http://localhost:8000/ask", {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q, history }),
