@@ -50,13 +50,12 @@ LLM_FALLBACK_MODELS = [
 # Voyage AI API — no local models, zero RAM overhead
 # ══════════════════════════════════════════════════════════════════
 
-VOYAGE_API_KEY      = os.getenv("VOYAGE_API_KEY", "")
-EMBEDDING_MODEL     = "voyage-3"                  # state of art 2024
-EMBEDDING_DIM       = 1024                        # voyage-3 output dim
-EMBEDDING_BATCH     = 128                         # voyage supports larger batches
-RERANKER_MODEL      = "rerank-2"                  # voyage reranker
+NOMIC_API_KEY       = os.getenv("NOMIC_API_KEY", "")
+EMBEDDING_MODEL     = "nomic-embed-text-v1.5"
+EMBEDDING_DIM       = 1024
+EMBEDDING_BATCH     = 128
+RERANKER_MODEL      = None
 RERANKER_TOP_K      = 5
-
 
 # ══════════════════════════════════════════════════════════════════
 # VECTOR DB CONFIGURATION
@@ -254,7 +253,7 @@ def validate():
     if not USE_LOCAL_LLM and not LLM_API_KEY:
         errors.append("GROQ_API_KEY environment variable not set")
 
-    if not VOYAGE_API_KEY:
+    if not NOMIC_API_KEY:
         errors.append("VOYAGE_API_KEY environment variable not set")
 
     if not QDRANT_URL or QDRANT_URL == f"http://{QDRANT_HOST}:{QDRANT_PORT}":

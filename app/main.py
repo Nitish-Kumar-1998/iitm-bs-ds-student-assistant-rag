@@ -21,7 +21,8 @@ import hashlib
 import asyncio
 import logging
 import time
-import voyageai
+import nomic
+from nomic import embed as nomic_embed
 from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import ScoredPoint
@@ -36,7 +37,7 @@ from config import (
     LLM_MODEL,
     LLM_FALLBACK_MODELS,
     LLM_PROVIDER,
-    VOYAGE_API_KEY,
+    NOMIC_API_KEY,
     EMBEDDING_MODEL,
     RERANKER_MODEL,
     RERANKER_TOP_K,
@@ -156,9 +157,9 @@ If answer truly not in context:
 # INIT — Voyage AI client (no local models, zero RAM overhead)
 # ══════════════════════════════════════════════════════════════════
 
-print("Initialising Voyage AI client...")
-voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
-print(f"✅ Voyage AI ready: {EMBEDDING_MODEL} + {RERANKER_MODEL}")
+print("Initialising Nomic client...")
+nomic.login(NOMIC_API_KEY)
+print(f"✅ Nomic ready: {EMBEDDING_MODEL}")
 
 print(f"Connecting to Qdrant at {QDRANT_URL}...")
 qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
@@ -344,13 +345,13 @@ def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tup
     Uses Voyage AI for both embedding and reranking — zero local RAM.
     """
 
-    # ── Step 1: Embed query with Voyage AI ──────────────────────
-    embed_result = voyage_client.embed(
-        [question],
+    embed_result = nomic_embed.text(
+        texts=[question],
         model=EMBEDDING_MODEL,
-        input_type="query",           # "query" for search time, "document" for upload time
+        task_type="search_query",
+        dimensionality=1024,
     )
-    query_vec = embed_result.embeddings[0]
+    query_vec = embed_result["embeddings"][0]
 
     # ── Step 2: Build sparse vector for BM25 ────────────────────
     sparse_indices, sparse_values = build_sparse_vector(question)
@@ -438,20 +439,13 @@ def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tup
     # ── Step 7: Rerank with Voyage AI ───────────────────────────
     documents = [p.payload.get("content", "") for p in all_points]
 
-    rerank_result = voyage_client.rerank(
-        query=question,
-        documents=documents,
-        model=RERANKER_MODEL,
-        top_k=RERANK_TOP_K,
-    )
-
-    top_score = rerank_result.results[0].relevance_score if rerank_result.results else 0.0
+    # No reranker — return top chunks by hybrid score directly
+    top_score = merged[0]["score"] if merged else 0.0
 
     chunks = []
-    for item in rerank_result.results:
-        point   = all_points[item.index]       # voyage returns original index
+    for point in top_points[:RERANK_TOP_K]:
         payload = dict(point.payload)
-        payload["rerank_score"] = float(item.relevance_score)
+        payload["rerank_score"] = float(point.score)
         chunks.append(payload)
 
     return chunks, top_score

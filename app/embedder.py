@@ -32,13 +32,13 @@ Run:
 import json
 import logging
 import time
-import voyageai
 from pathlib import Path
 from tqdm import tqdm
-
+import nomic
+from nomic import embed
 from config import (
     ALL_CHUNKS_FILE,
-    VOYAGE_API_KEY,
+    NOMIC_API_KEY,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
     EMBEDDING_BATCH,
@@ -119,37 +119,26 @@ def save_progress(embedded_ids: set):
 # ══════════════════════════════════════════════════════════════════
 
 def embed_batch_with_retry(
-    client: voyageai.Client,
+    client,
     texts: list[str],
     model: str,
     input_type: str = "document",
     max_retries: int = 5,
 ) -> list[list[float]]:
-    """
-    Embed a batch of texts with Voyage AI.
-    Retries on rate limit or transient errors.
-
-    input_type:
-      "document" → for uploading chunks to Qdrant (richer representation)
-      "query"    → for search time queries (optimised for retrieval)
-    """
+    task_type = "search_document" if input_type == "document" else "search_query"
     for attempt in range(max_retries):
         try:
-            result = client.embed(
-                texts,
+            result = embed.text(
+                texts=texts,
                 model=model,
-                input_type=input_type,
+                task_type=task_type,
+                dimensionality=1024,
             )
-            return result.embeddings
+            return result["embeddings"]
         except Exception as e:
-            err = str(e).lower()
-            if "rate" in err or "429" in err:
-                wait = 25 ** attempt
-                logger.warning(f"Rate limited — waiting {wait}s before retry {attempt + 1}/{max_retries}")
-                time.sleep(wait)
-            else:
-                logger.error(f"Embedding failed: {e}")
-                raise e
+            wait = 25
+            logger.warning(f"Error — waiting {wait}s before retry {attempt + 1}/{max_retries}: {e}")
+            time.sleep(wait)
     raise Exception(f"Embedding failed after {max_retries} retries")
 
 
@@ -182,10 +171,10 @@ def run():
         existing_embedded = {c["chunk_id"]: c["embedding"] for c in existing if "embedding" in c}
         print(f"  Already embedded: {len(existing_embedded)} chunks")
 
-    # Initialise Voyage AI client
-    print(f"\n  Initialising Voyage AI client...")
-    client = voyageai.Client(api_key=VOYAGE_API_KEY)
-    print(f"  ✅ Voyage AI ready — model: {EMBEDDING_MODEL} (dim: {EMBEDDING_DIM})")
+    print(f"\n  Initialising Nomic client...")
+    nomic.login(NOMIC_API_KEY)
+    client = None
+    print(f"  ✅ Nomic ready — model: {EMBEDDING_MODEL} (dim: {EMBEDDING_DIM})")
 
     # Split into needs embedding vs already done
     needs_embedding = []
