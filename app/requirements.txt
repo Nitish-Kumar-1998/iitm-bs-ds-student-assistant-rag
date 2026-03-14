@@ -1,6 +1,5 @@
 voyageai==0.3.2
 beautifulsoup4==4.14.3
-docling==2.78.0
 fastapi==0.135.1
 markdownify==1.2.2
 openai==2.26.0
