@@ -97,7 +97,6 @@ def call_llm(prompt: str, max_tokens: int = 200) -> str | None:
     logger.error("All models exhausted")
     return None
 
-
 # ══════════════════════════════════════════════════════════════════
 # QUESTION GENERATOR
 # ══════════════════════════════════════════════════════════════════
@@ -152,7 +151,6 @@ def save_progress(chunks: list[dict]):
     """Save chunks back to all_chunks.json."""
     with open(ALL_CHUNKS_FILE, "w", encoding="utf-8") as f:
         json.dump(chunks, f, indent=2, ensure_ascii=False)
-
 
 # ══════════════════════════════════════════════════════════════════
 # MAIN
@@ -287,3 +285,6 @@ def _print_summary(chunks: list[dict], stats: dict = None):
 
 if __name__ == "__main__":
     run()
+
+
+    

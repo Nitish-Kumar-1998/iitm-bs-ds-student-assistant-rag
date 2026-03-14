@@ -1,13 +1,11 @@
 """
-IITM BS RAG Pipeline — Stage 10: FastAPI Backend
+IITM BS RAG Pipeline — Stage 11: FastAPI Backend
 =================================================
-Fixes in this version:
-  1. Source URL always shown in citations (mandatory, not optional)
-  2. Query expansion — ALL questions rewritten for better retrieval
-  3. Confidence threshold — if top rerank score < 0.3, broaden search
-  4. Yes/No prompt instruction — direct answers, no hedging
-  5. RETRIEVAL_TOP_K increased to 20 for wider net
-  6. Answer confidence instruction — no "it seems", "however" hedging
+Changes in this version:
+  - Replaced local SentenceTransformer + CrossEncoder with Voyage AI API
+  - Zero RAM overhead for ML models (voyage-3 + rerank-2)
+  - Faster startup (no model loading)
+  - Better retrieval quality (voyage-3 vs MiniLM)
 
 Endpoints:
   POST /ask        → streaming SSE answer
@@ -23,10 +21,10 @@ import hashlib
 import asyncio
 import logging
 import time
+import voyageai
 from openai import OpenAI
 from qdrant_client import QdrantClient
 from qdrant_client.models import ScoredPoint
-from sentence_transformers import SentenceTransformer, CrossEncoder
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -38,6 +36,7 @@ from config import (
     LLM_MODEL,
     LLM_FALLBACK_MODELS,
     LLM_PROVIDER,
+    VOYAGE_API_KEY,
     EMBEDDING_MODEL,
     RERANKER_MODEL,
     RERANKER_TOP_K,
@@ -61,10 +60,10 @@ logger = logging.getLogger("main")
 
 MAX_HISTORY = 6
 
-# FIX 5: increased retrieval pool for wider net before reranking
+# increased retrieval pool for wider net before reranking
 RETRIEVAL_TOP_K_EXPANDED = 20
 
-# FIX 3: confidence threshold — below this score, broaden search
+# confidence threshold — below this score, broaden search
 CONFIDENCE_THRESHOLD = 0.3
 
 # ══════════════════════════════════════════════════════════════════
@@ -154,19 +153,15 @@ If answer truly not in context:
 """
 
 # ══════════════════════════════════════════════════════════════════
-# INIT — load models once at startup
+# INIT — Voyage AI client (no local models, zero RAM overhead)
 # ══════════════════════════════════════════════════════════════════
 
-print("Loading embedding model...")
-embed_model = SentenceTransformer(EMBEDDING_MODEL)
-print(f"✅ Embedding model loaded: {EMBEDDING_MODEL}")
-
-print("Loading reranker model...")
-reranker = CrossEncoder(RERANKER_MODEL)
-print(f"✅ Reranker loaded: {RERANKER_MODEL}")
+print("Initialising Voyage AI client...")
+voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
+print(f"✅ Voyage AI ready: {EMBEDDING_MODEL} + {RERANKER_MODEL}")
 
 print(f"Connecting to Qdrant at {QDRANT_URL}...")
-qdrant = QdrantClient(url=QDRANT_URL,api_key=QDRANT_API_KEY, timeout=10)
+qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=10)
 print("✅ Qdrant connected")
 
 print(f"Initialising LLM client ({LLM_PROVIDER})...")
@@ -265,12 +260,12 @@ def is_off_topic(question: str) -> bool:
 
 
 # ══════════════════════════════════════════════════════════════════
-# FIX 2 — QUERY EXPANSION (all questions, not just vague ones)
+# QUERY EXPANSION — rewrite all questions for better retrieval
 # ══════════════════════════════════════════════════════════════════
 
 def rewrite_query(question: str, history: list[ChatMessage]) -> str:
     """
-    FIX 2: Rewrite ALL questions for better retrieval, not just vague ones.
+    Rewrite ALL questions for better retrieval, not just vague ones.
     - Expands synonyms (fail → not pass, academic failure)
     - Resolves pronouns using history
     - Makes implicit topics explicit
@@ -313,7 +308,7 @@ def rewrite_query(question: str, history: list[ChatMessage]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════
-# SPARSE VECTOR BUILDER
+# SPARSE VECTOR BUILDER (BM25 approximation)
 # ══════════════════════════════════════════════════════════════════
 
 def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
@@ -340,21 +335,27 @@ def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
 
 
 # ══════════════════════════════════════════════════════════════════
-# HYBRID RETRIEVAL
+# HYBRID RETRIEVAL — Voyage AI embed + rerank
 # ══════════════════════════════════════════════════════════════════
 
 def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tuple[list[dict], float]:
     """
     Returns (chunks, top_rerank_score) so caller can check confidence.
-    FIX 5: uses RETRIEVAL_TOP_K_EXPANDED=20 by default.
+    Uses Voyage AI for both embedding and reranking — zero local RAM.
     """
-    query_vec = embed_model.encode(
-        question,
-        normalize_embeddings=True
-    ).tolist()
 
+    # ── Step 1: Embed query with Voyage AI ──────────────────────
+    embed_result = voyage_client.embed(
+        [question],
+        model=EMBEDDING_MODEL,
+        input_type="query",           # "query" for search time, "document" for upload time
+    )
+    query_vec = embed_result.embeddings[0]
+
+    # ── Step 2: Build sparse vector for BM25 ────────────────────
     sparse_indices, sparse_values = build_sparse_vector(question)
 
+    # ── Step 3: Dense search ────────────────────────────────────
     try:
         dense_results = qdrant.query_points(
             collection_name = QDRANT_COLLECTION,
@@ -372,6 +373,7 @@ def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tup
             with_payload    = True,
         ).points
 
+    # ── Step 4: Sparse search (BM25) ────────────────────────────
     try:
         from qdrant_client.models import SparseVector
         sparse_results = qdrant.query_points(
@@ -385,6 +387,7 @@ def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tup
         logger.warning(f"Sparse search failed: {e}")
         sparse_results = []
 
+    # ── Step 5: Merge dense + sparse scores ─────────────────────
     seen_ids = {}
     for point in dense_results:
         seen_ids[point.id] = {"point": point, "score": point.score * VECTOR_WEIGHT}
@@ -400,6 +403,7 @@ def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tup
     if not top_points:
         return [], 0.0
 
+    # ── Step 6: Cross-reference expansion ───────────────────────
     all_points   = list(top_points)
     ref_sections = set()
     for point in top_points:
@@ -431,16 +435,23 @@ def retrieve_chunks(question: str, top_k: int = RETRIEVAL_TOP_K_EXPANDED) -> tup
         except Exception as e:
             logger.warning(f"Cross-ref fetch failed: {e}")
 
-    pairs  = [(question, p.payload.get("content", "")) for p in all_points]
-    scores = reranker.predict(pairs)
-    ranked = sorted(zip(scores, all_points), key=lambda x: x[0], reverse=True)
+    # ── Step 7: Rerank with Voyage AI ───────────────────────────
+    documents = [p.payload.get("content", "") for p in all_points]
 
-    top_score = float(ranked[0][0]) if ranked else 0.0
+    rerank_result = voyage_client.rerank(
+        query=question,
+        documents=documents,
+        model=RERANKER_MODEL,
+        top_k=RERANK_TOP_K,
+    )
+
+    top_score = rerank_result.results[0].relevance_score if rerank_result.results else 0.0
 
     chunks = []
-    for score, point in ranked[:RERANK_TOP_K]:
-        payload               = dict(point.payload)
-        payload["rerank_score"] = float(score)
+    for item in rerank_result.results:
+        point   = all_points[item.index]       # voyage returns original index
+        payload = dict(point.payload)
+        payload["rerank_score"] = float(item.relevance_score)
         chunks.append(payload)
 
     return chunks, top_score
@@ -464,7 +475,7 @@ def build_context(chunks: list[dict]) -> tuple[str, list[dict], list[dict]]:
         section    = chunk.get("section", "")
         source_url = chunk.get("source_url", "https://study.iitm.ac.in/ds/")
 
-        # FIX: noise section filter — skip generic handbook boilerplate as sources
+        # noise section filter — skip generic handbook boilerplate as sources
         noise_sections = [
             "this will be in effect",
             "important advisory",
@@ -476,9 +487,9 @@ def build_context(chunks: list[dict]) -> tuple[str, list[dict], list[dict]]:
             context_parts.append(
                 f"[SOURCE: {doc_title} — {section} | URL: {source_url}]\n{content}"
             )
-            source_key = f"{doc_title}|{section}"
+            source_key   = f"{doc_title}|{section}"
             rerank_score = chunk.get("rerank_score", 0)
-            # FIX: only add to sources if high confidence AND not noise section
+            # only add to sources if high confidence AND not noise section
             if source_key not in seen_sources and rerank_score > 0.4 and not is_noise:
                 seen_sources.add(source_key)
                 sources.append({
@@ -585,21 +596,21 @@ async def ask(req: AskRequest):
                 yield sse("done", {})
                 return
 
-            # 2. FIX 2: rewrite ALL questions for better retrieval
+            # 2. Rewrite ALL questions for better retrieval
             yield sse("status", {"text": "Understanding your question..."})
             rewritten = rewrite_query(question, req.history)
 
-            # 3. Hybrid retrieval + rerank
+            # 3. Hybrid retrieval + Voyage AI rerank
             yield sse("status", {"text": "Searching programme documents..."})
             chunks, top_score = retrieve_chunks(rewritten)
 
-            # FIX 3: confidence threshold — broaden search if score too low
+            # confidence threshold — broaden search if score too low
             if top_score < CONFIDENCE_THRESHOLD and chunks:
                 logger.info(f"Low confidence ({top_score:.2f}), broadening search with original question...")
                 yield sse("status", {"text": "Searching deeper..."})
                 chunks2, score2 = retrieve_chunks(question, top_k=30)
                 if score2 > top_score:
-                    chunks  = chunks2
+                    chunks    = chunks2
                     top_score = score2
                     logger.info(f"Broadened search improved score to {score2:.2f}")
 
@@ -643,7 +654,7 @@ async def ask(req: AskRequest):
 
             stream_resp = llm_call(
                 messages   = messages,
-                max_tokens = 1200,  # FIX: increased for detailed answers
+                max_tokens = 1200,
                 stream     = True,
             )
 
@@ -687,15 +698,17 @@ def health():
         qdrant_ok = f"error: {e}"
 
     return {
-        "status":        "ok",
-        "llm_provider":  LLM_PROVIDER,
-        "llm_model":     LLM_MODEL,
-        "embed_model":   EMBEDDING_MODEL,
-        "rerank_model":  RERANKER_MODEL,
-        "qdrant":        qdrant_ok,
-        "collection":    QDRANT_COLLECTION,
-        "hybrid_search": f"vector({VECTOR_WEIGHT}) + bm25({BM25_WEIGHT})",
-        "retrieval_top_k": RETRIEVAL_TOP_K_EXPANDED,
+        "status":               "ok",
+        "llm_provider":         LLM_PROVIDER,
+        "llm_model":            LLM_MODEL,
+        "embed_model":          EMBEDDING_MODEL,
+        "embed_provider":       "voyage_ai",
+        "rerank_model":         RERANKER_MODEL,
+        "rerank_provider":      "voyage_ai",
+        "qdrant":               qdrant_ok,
+        "collection":           QDRANT_COLLECTION,
+        "hybrid_search":        f"vector({VECTOR_WEIGHT}) + bm25({BM25_WEIGHT})",
+        "retrieval_top_k":      RETRIEVAL_TOP_K_EXPANDED,
         "confidence_threshold": CONFIDENCE_THRESHOLD,
     }
 
@@ -703,10 +716,3 @@ def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
-
-
-
-
-
-    

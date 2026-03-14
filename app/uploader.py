@@ -2,7 +2,7 @@
 IITM BS RAG Pipeline — Stage 6: Uploader
 ==========================================
 INPUT:  output/chunks/all_chunks_embedded.json  (from embedder.py)
-OUTPUT: Qdrant collection "iitm_bs" (local Docker)
+OUTPUT: Qdrant collection "iitm_bs" (cloud or local)
 
 What it does:
   - Wipes and recreates Qdrant collection fresh (Plan A)
@@ -16,9 +16,6 @@ Hybrid search weights (from config):
   VECTOR_WEIGHT = 0.7  (semantic — finds meaning)
   BM25_WEIGHT   = 0.3  (keyword — finds exact terms)
 
-Start Qdrant first:
-  docker run -p 6333:6333 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant
-
 Run:
   python uploader.py
 """
@@ -26,9 +23,9 @@ Run:
 import json
 import hashlib
 import logging
+import voyageai
 from pathlib import Path
 from tqdm import tqdm
-
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -37,9 +34,7 @@ from qdrant_client.models import (
     SparseIndexParams,
     PointStruct,
     PayloadSchemaType,
-    models,
 )
-from sentence_transformers import SentenceTransformer
 
 from config import (
     QDRANT_HOST,
@@ -47,12 +42,14 @@ from config import (
     QDRANT_URL,
     QDRANT_API_KEY,
     QDRANT_COLLECTION,
+    VOYAGE_API_KEY,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
     VECTOR_WEIGHT,
     BM25_WEIGHT,
     LOG_LEVEL,
     LOG_FORMAT,
+    ALL_CHUNKS_FILE,
 )
 
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
@@ -62,10 +59,9 @@ logger = logging.getLogger("uploader")
 # PATHS
 # ══════════════════════════════════════════════════════════════════
 
-from config import ALL_CHUNKS_FILE
 EMBEDDED_FILE = ALL_CHUNKS_FILE.parent / "all_chunks_embedded.json"
-
 BATCH_SIZE    = 100
+
 
 # ══════════════════════════════════════════════════════════════════
 # CHUNK ID → QDRANT POINT ID
@@ -79,7 +75,7 @@ def chunk_id_to_point_id(chunk_id: str) -> int:
     """
     Convert 12-char hex chunk_id to stable integer for Qdrant.
     Uses MD5 of chunk_id to get full 32-char hex → take first 8 → int.
-    Collision probability is negligible for 675 chunks.
+    Collision probability is negligible for typical chunk counts.
     """
     full_hash = hashlib.md5(chunk_id.encode()).hexdigest()
     return int(full_hash[:8], 16)
@@ -95,7 +91,7 @@ def build_payload(chunk: dict) -> dict:
     INPUT:  chunk dict (without embedding)
     OUTPUT: complete payload dict for Qdrant
 
-    Includes ALL new fields from the rebuilt pipeline:
+    Includes ALL fields from the rebuilt pipeline:
     hyde_questions, parent_doc, references, created_at,
     version, what_it_contains, when_to_refer, access,
     image_content, found_in_doc
@@ -144,19 +140,19 @@ def build_payload(chunk: dict) -> dict:
         payload["scan_method"]   = chunk.get("scan_method", "")
 
     if chunk_type == "reference_link":
-        payload["link_url"]          = chunk.get("link_url", "")
-        payload["link_text"]         = chunk.get("link_text", "")
-        payload["what_it_contains"]  = chunk.get("what_it_contains", "")
-        payload["when_to_refer"]     = chunk.get("when_to_refer", "")
-        payload["category"]          = chunk.get("category", "")
-        payload["access"]            = chunk.get("access", "public")
-        payload["found_in_doc"]      = chunk.get("found_in_doc", "")
+        payload["link_url"]         = chunk.get("link_url", "")
+        payload["link_text"]        = chunk.get("link_text", "")
+        payload["what_it_contains"] = chunk.get("what_it_contains", "")
+        payload["when_to_refer"]    = chunk.get("when_to_refer", "")
+        payload["category"]         = chunk.get("category", "")
+        payload["access"]           = chunk.get("access", "public")
+        payload["found_in_doc"]     = chunk.get("found_in_doc", "")
 
     if chunk_type == "restricted_doc":
-        payload["link_url"]    = chunk.get("link_url", "")
-        payload["skip_reason"] = chunk.get("skip_reason", "")
-        payload["note"]        = chunk.get("note", "")
-        payload["access"]      = chunk.get("access", "restricted")
+        payload["link_url"]     = chunk.get("link_url", "")
+        payload["skip_reason"]  = chunk.get("skip_reason", "")
+        payload["note"]         = chunk.get("note", "")
+        payload["access"]       = chunk.get("access", "restricted")
         payload["found_in_doc"] = chunk.get("found_in_doc", "")
 
     return payload
@@ -176,18 +172,16 @@ def setup_collection(client: QdrantClient):
     Dense vector: cosine similarity (semantic search)
     Sparse vector: BM25 (keyword search)
     """
-    # Always delete and recreate fresh
     existing = [c.name for c in client.get_collections().collections]
     if QDRANT_COLLECTION in existing:
         client.delete_collection(QDRANT_COLLECTION)
         print(f"  🗑  Deleted existing collection: {QDRANT_COLLECTION}")
 
-    # Create with hybrid search support
     client.create_collection(
         collection_name=QDRANT_COLLECTION,
         vectors_config={
             "dense": VectorParams(
-                size=EMBEDDING_DIM,
+                size=EMBEDDING_DIM,        # 1024 for voyage-3
                 distance=Distance.COSINE,
             )
         },
@@ -200,7 +194,7 @@ def setup_collection(client: QdrantClient):
         },
     )
     print(f"  ✅ Created collection: {QDRANT_COLLECTION}")
-    print(f"     Dense:  {EMBEDDING_DIM}d cosine (semantic)")
+    print(f"     Dense:  {EMBEDDING_DIM}d cosine (voyage-3 semantic)")
     print(f"     Sparse: BM25 (keyword)")
     print(f"     Weights: vector={VECTOR_WEIGHT}, bm25={BM25_WEIGHT}")
 
@@ -218,23 +212,17 @@ def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
     Simple term frequency approach for BM25.
     Each unique word gets a stable index (hash-based).
     Value = term frequency normalized.
-
-    For production, use fastembed BM25 model.
-    This is a working approximation for now.
     """
     import re
     from collections import Counter
 
-    # Tokenize
     words = re.findall(r'\b[a-z]{2,}\b', text.lower())
     if not words:
         return [0], [0.0]
 
-    # Term frequency
-    tf = Counter(words)
+    tf    = Counter(words)
     total = len(words)
 
-    # Build index → value map (deduplicates hash collisions by summing)
     index_map = {}
     for word, count in tf.items():
         word_idx = int(hashlib.md5(word.encode()).hexdigest()[:6], 16) % 100000
@@ -244,10 +232,7 @@ def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
         else:
             index_map[word_idx] = tf_score
 
-    indices = list(index_map.keys())
-    values  = [float(v) for v in index_map.values()]
-
-    return indices, values
+    return list(index_map.keys()), [float(v) for v in index_map.values()]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -257,6 +242,7 @@ def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
 def run():
     print("\n" + "═" * 65)
     print("  IITM BS RAG Pipeline — Stage 6: Uploader")
+    print("  Embedding provider: Voyage AI (voyage-3)")
     print("═" * 65)
 
     # Load embedded chunks
@@ -270,40 +256,47 @@ def run():
         chunks = json.load(f)
     print(f"  Loaded {len(chunks)} chunks")
 
-    # Verify embeddings present
+    # Verify embeddings present and correct dimension
     missing_emb = sum(1 for c in chunks if "embedding" not in c)
     if missing_emb:
         print(f"  ❌ {missing_emb} chunks missing embeddings — run embedder.py first")
         return
-    print(f"  ✅ All chunks have embeddings")
+
+    # Check embedding dimension matches config
+    sample_emb = next(c for c in chunks if "embedding" in c)
+    actual_dim = len(sample_emb["embedding"])
+    if actual_dim != EMBEDDING_DIM:
+        print(f"  ❌ Dimension mismatch: embeddings are {actual_dim}d but config says {EMBEDDING_DIM}d")
+        print(f"     Update EMBEDDING_DIM = {actual_dim} in config.py")
+        return
+
+    print(f"  ✅ All chunks have embeddings (dim={actual_dim})")
 
     # Connect to Qdrant
     print(f"\n  Connecting to Qdrant at {QDRANT_URL}...")
-    client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
+    qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
     try:
-        client.get_collections()
+        qdrant.get_collections()
         print(f"  ✅ Connected to Qdrant")
     except Exception as e:
         print(f"  ❌ Cannot connect: {e}")
-        print(f"\n  Start Qdrant with:")
-        print(f"  docker run -p 6333:6333 -v $(pwd)/qdrant_storage:/qdrant/storage qdrant/qdrant")
         return
 
     # Setup collection (wipe + recreate)
     print(f"\n  Setting up collection...")
-    setup_collection(client)
+    setup_collection(qdrant)
 
     # Build and upload points
     print(f"\n  Building {len(chunks)} points...")
 
-    points      = []
-    id_map      = {}   # chunk_id → point_id for debugging
+    points        = []
+    id_map        = {}
     id_collisions = 0
 
     for chunk in chunks:
-        embedding  = chunk.get("embedding", [])
-        chunk_id   = chunk.get("chunk_id", "")
-        point_id   = chunk_id_to_point_id(chunk_id)
+        embedding = chunk.get("embedding", [])
+        chunk_id  = chunk.get("chunk_id", "")
+        point_id  = chunk_id_to_point_id(chunk_id)
 
         # Check for ID collision (extremely rare)
         if point_id in id_map:
@@ -318,9 +311,9 @@ def run():
         payload = build_payload(chunk)
 
         points.append(PointStruct(
-            id      = point_id,
-            vector  = {
-                "dense":  embedding,
+            id     = point_id,
+            vector = {
+                "dense": embedding,
                 "sparse": {
                     "indices": sparse_indices,
                     "values":  sparse_values,
@@ -336,7 +329,7 @@ def run():
     print(f"\n  Uploading to Qdrant in batches of {BATCH_SIZE}...")
     for i in tqdm(range(0, len(points), BATCH_SIZE), desc="  Uploading"):
         batch = points[i:i + BATCH_SIZE]
-        client.upsert(
+        qdrant.upsert(
             collection_name=QDRANT_COLLECTION,
             points=batch,
         )
@@ -344,16 +337,16 @@ def run():
     # Create payload indexes for fast filtering
     print(f"\n  Creating payload indexes...")
     index_fields = [
-        ("chunk_type",  PayloadSchemaType.KEYWORD),
-        ("doc_title",   PayloadSchemaType.KEYWORD),
-        ("parent_doc",  PayloadSchemaType.KEYWORD),
-        ("section",     PayloadSchemaType.KEYWORD),
-        ("access",      PayloadSchemaType.KEYWORD),
+        ("chunk_type",    PayloadSchemaType.KEYWORD),
+        ("doc_title",     PayloadSchemaType.KEYWORD),
+        ("parent_doc",    PayloadSchemaType.KEYWORD),
+        ("section",       PayloadSchemaType.KEYWORD),
+        ("access",        PayloadSchemaType.KEYWORD),
         ("heading_level", PayloadSchemaType.INTEGER),
     ]
     for field, schema in index_fields:
         try:
-            client.create_payload_index(
+            qdrant.create_payload_index(
                 collection_name=QDRANT_COLLECTION,
                 field_name=field,
                 field_schema=schema,
@@ -363,15 +356,15 @@ def run():
             logger.warning(f"Index {field} skipped: {e}")
 
     # Verify upload
-    info  = client.get_collection(QDRANT_COLLECTION)
+    info  = qdrant.get_collection(QDRANT_COLLECTION)
     count = info.points_count
     print(f"\n  ✅ Upload complete!")
     print(f"     Collection: {QDRANT_COLLECTION}")
     print(f"     Points:     {count}")
 
-    # ── Test searches ──────────────────────────────────────────────
-    print(f"\n  Running test searches...")
-    model = SentenceTransformer(EMBEDDING_MODEL)
+    # ── Test searches using Voyage AI ─────────────────────────────
+    print(f"\n  Running test searches via Voyage AI...")
+    voyage = voyageai.Client(api_key=VOYAGE_API_KEY)
 
     test_queries = [
         "eligibility criteria for foundation level admission",
@@ -381,10 +374,16 @@ def run():
 
     for query in test_queries:
         print(f"\n  Query: '{query}'")
-        vec = model.encode(query, normalize_embeddings=True).tolist()
 
-        # Dense vector search
-        results = client.query_points(
+        # Embed with Voyage AI — input_type="query" for search time
+        result = voyage.embed(
+            [query],
+            model=EMBEDDING_MODEL,
+            input_type="query",
+        )
+        vec = result.embeddings[0]
+
+        results = qdrant.query_points(
             collection_name=QDRANT_COLLECTION,
             query=vec,
             using="dense",
@@ -403,12 +402,13 @@ def run():
         type_counts[t] = type_counts.get(t, 0) + 1
 
     print(f"\n  {'═' * 40}")
-    print(f"  Collection: {QDRANT_COLLECTION}")
-    print(f"  Total points: {count}")
+    print(f"  Collection:     {QDRANT_COLLECTION}")
+    print(f"  Total points:   {count}")
+    print(f"  Embedding dim:  {actual_dim} (voyage-3)")
     for t, c in sorted(type_counts.items()):
         print(f"    {t:20s}: {c}")
     print(f"\n  Hybrid search: vector({VECTOR_WEIGHT}) + BM25({BM25_WEIGHT})")
-    print(f"\n  Next step: python evaluator.py")
+    print(f"\n  Next step: python main.py (or uvicorn main:app)")
     print("═" * 65)
 
 

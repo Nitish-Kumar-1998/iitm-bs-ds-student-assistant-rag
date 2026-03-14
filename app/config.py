@@ -32,7 +32,6 @@ if USE_LOCAL_LLM:
     LLM_PROVIDER    = "ollama"
 else:
     # ── Groq (public mode) ────────────────────────────────────
-    import os
     LLM_BASE_URL    = "https://api.groq.com/openai/v1"
     LLM_API_KEY     = os.getenv("GROQ_API_KEY", "")
     LLM_MODEL       = "llama-3.3-70b-versatile"
@@ -44,22 +43,20 @@ LLM_FALLBACK_MODELS = [
     "llama3-8b-8192",
     "gemma2-9b-it",
 ] if not USE_LOCAL_LLM else []
-# ══════════════════════════════════════════════════════════════════
-# EMBEDDING CONFIGURATION
-# Always local — embeddings never leave your machine
-# ══════════════════════════════════════════════════════════════════
 
-EMBEDDING_MODEL     = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_DIM       = 384
-EMBEDDING_BATCH     = 64                          # chunks per embedding batch
 
 # ══════════════════════════════════════════════════════════════════
-# RERANKER CONFIGURATION
-# Always local
+# EMBEDDING & RERANKER CONFIGURATION
+# Voyage AI API — no local models, zero RAM overhead
 # ══════════════════════════════════════════════════════════════════
 
-RERANKER_MODEL      = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-RERANKER_TOP_K      = 5                           # rerank top 5 candidates
+VOYAGE_API_KEY      = os.getenv("VOYAGE_API_KEY", "")
+EMBEDDING_MODEL     = "voyage-3"                  # state of art 2024
+EMBEDDING_DIM       = 1024                        # voyage-3 output dim
+EMBEDDING_BATCH     = 128                         # voyage supports larger batches
+RERANKER_MODEL      = "rerank-2"                  # voyage reranker
+RERANKER_TOP_K      = 5
+
 
 # ══════════════════════════════════════════════════════════════════
 # VECTOR DB CONFIGURATION
@@ -257,7 +254,10 @@ def validate():
     if not USE_LOCAL_LLM and not LLM_API_KEY:
         errors.append("GROQ_API_KEY environment variable not set")
 
-    if QDRANT_HOST == "localhost":
+    if not VOYAGE_API_KEY:
+        errors.append("VOYAGE_API_KEY environment variable not set")
+
+    if not QDRANT_URL or QDRANT_URL == f"http://{QDRANT_HOST}:{QDRANT_PORT}":
         import socket
         try:
             socket.connect_ex(("localhost", QDRANT_PORT))
@@ -272,10 +272,12 @@ def validate():
 
     print(f"\n✅ Config loaded:")
     print(f"   LLM:        {LLM_PROVIDER} → {LLM_MODEL}")
-    print(f"   Embeddings: {EMBEDDING_MODEL}")
-    print(f"   Vector DB:  Qdrant {QDRANT_HOST}:{QDRANT_PORT}/{QDRANT_COLLECTION}")
+    print(f"   Embeddings: {EMBEDDING_MODEL} (Voyage AI)")
+    print(f"   Reranker:   {RERANKER_MODEL} (Voyage AI)")
+    print(f"   Vector DB:  {QDRANT_URL}/{QDRANT_COLLECTION}")
     print(f"   Mode:       {'🔒 Private (local)' if USE_LOCAL_LLM else '🌐 Public (API)'}")
 
 
 if __name__ == "__main__":
     validate()
+
