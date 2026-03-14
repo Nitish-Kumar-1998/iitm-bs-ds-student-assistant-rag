@@ -59,7 +59,7 @@ EMBEDDED_FILE = ALL_CHUNKS_FILE.parent / "all_chunks_embedded.json"
 PROGRESS_FILE = ALL_CHUNKS_FILE.parent / "embedding_progress.json"
 
 # Voyage AI batch limit — max 128 texts per request
-VOYAGE_BATCH_SIZE = 128
+VOYAGE_BATCH_SIZE = 10
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -123,7 +123,7 @@ def embed_batch_with_retry(
     texts: list[str],
     model: str,
     input_type: str = "document",
-    max_retries: int = 3,
+    max_retries: int = 5,
 ) -> list[list[float]]:
     """
     Embed a batch of texts with Voyage AI.
@@ -144,7 +144,7 @@ def embed_batch_with_retry(
         except Exception as e:
             err = str(e).lower()
             if "rate" in err or "429" in err:
-                wait = 2 ** attempt
+                wait = 25 ** attempt
                 logger.warning(f"Rate limited — waiting {wait}s before retry {attempt + 1}/{max_retries}")
                 time.sleep(wait)
             else:
@@ -254,7 +254,7 @@ def run():
                 logger.info(f"Progress saved — {len(embedded_ids)} chunks embedded")
 
             # Small delay to respect rate limits
-            time.sleep(0.1)
+            time.sleep(20)
 
     # Final save
     save_progress(embedded_ids)
