@@ -15,7 +15,7 @@ interface MessageBubbleProps {
 function MarkdownContent({ content, dark }: { content: string; dark: boolean }) {
   const clean = content.replace(/\n*📎[\s\S]*$/m, "").trim();
   return (
-    <div className={`prose prose-sm max-w-none ${dark ? "prose-invert" : ""}`}>
+    <div className={`prose prose-sm max-w-none [&_a]:text-[#c8102e] [&_a]:no-underline hover:[&_a]:underline ${dark ? "prose-invert" : ""}`}>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{clean}</ReactMarkdown>
     </div>
   );
