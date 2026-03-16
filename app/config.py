@@ -1,66 +1,45 @@
 """
 IITM BS RAG Pipeline — Central Configuration
-=============================================
-Single source of truth for entire pipeline.
-Switch between public (Groq) and private (Ollama)
-with one flag: USE_LOCAL_LLM = True/False
-
-Public mode  (USE_LOCAL_LLM = False) → Groq API
-Private mode (USE_LOCAL_LLM = True)  → Ollama local
 """
 import os
-from pathlib import Path
 from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-# ══════════════════════════════════════════════════════════════════
-# PRIVACY MODE — flip this one flag to switch entire system
-# ══════════════════════════════════════════════════════════════════
 
-USE_LOCAL_LLM = False  # True = Ollama (private), False = Groq (public)
-
-# ══════════════════════════════════════════════════════════════════
-# LLM CONFIGURATION
-# ══════════════════════════════════════════════════════════════════
+USE_LOCAL_LLM = False
 
 if USE_LOCAL_LLM:
-    # ── Ollama (private mode) ──────────────────────────────────
     LLM_BASE_URL    = "http://localhost:11434/v1"
-    LLM_API_KEY     = "ollama"                    # dummy key, required by openai client
-    LLM_MODEL       = "llama3.1"                  # change to llama3.1:70b if you have GPU
+    LLM_API_KEY     = "ollama"
+    LLM_MODEL       = "llama3.1"
     LLM_PROVIDER    = "ollama"
 else:
-    # ── Groq (public mode) ────────────────────────────────────
     LLM_BASE_URL    = "https://api.groq.com/openai/v1"
     LLM_API_KEY     = os.getenv("GROQ_API_KEY", "")
     LLM_MODEL       = "llama-3.3-70b-versatile"
     LLM_PROVIDER    = "groq"
 
-# LLM fallback models (Groq only)
 LLM_FALLBACK_MODELS = [
     "llama-3.1-8b-instant",
     "llama3-8b-8192",
     "gemma2-9b-it",
 ] if not USE_LOCAL_LLM else []
 
-
 # ══════════════════════════════════════════════════════════════════
-# EMBEDDING & RERANKER CONFIGURATION
-# Voyage AI API — no local models, zero RAM overhead
+# EMBEDDING CONFIGURATION — Gemini (free, no card needed)
 # ══════════════════════════════════════════════════════════════════
 
-NOMIC_API_KEY       = os.getenv("NOMIC_API_KEY", "")
-EMBEDDING_MODEL     = "nomic-embed-text-v1.5"
-EMBEDDING_DIM       = 1024
-EMBEDDING_BATCH     = 128
+GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
+EMBEDDING_MODEL     = "models/gemini-embedding-001"
+EMBEDDING_DIM       = 3072
+EMBEDDING_BATCH     = 1
 RERANKER_MODEL      = None
 RERANKER_TOP_K      = 5
 
 # ══════════════════════════════════════════════════════════════════
 # VECTOR DB CONFIGURATION
 # ══════════════════════════════════════════════════════════════════
-
 
 QDRANT_HOST         = "localhost"
 QDRANT_PORT         = 6333
@@ -69,13 +48,11 @@ QDRANT_COLLECTION   = "iitm_bs"
 QDRANT_URL          = os.getenv("QDRANT_URL", f"http://{QDRANT_HOST}:{QDRANT_PORT}")
 QDRANT_API_KEY      = os.getenv("QDRANT_API_KEY", None)
 
-# Hybrid search weights
-VECTOR_WEIGHT       = 0.7                         # semantic search weight
-BM25_WEIGHT         = 0.3                         # keyword search weight
+VECTOR_WEIGHT       = 0.7
+BM25_WEIGHT         = 0.3
 
-# Retrieval settings
-RETRIEVAL_TOP_K     = 20                          # fetch top 20 before reranking
-RERANK_TOP_K        = 4                           # keep top 5 after reranking
+RETRIEVAL_TOP_K     = 20
+RERANK_TOP_K        = 4
 
 # ══════════════════════════════════════════════════════════════════
 # SCRAPER CONFIGURATION
@@ -102,43 +79,40 @@ ROOT_DOCS = [
     },
 ]
 
-# Only follow Google Doc links
 FOLLOW_URL_PATTERN  = r"https://docs\.google\.com/document/"
 
-# Skip these domains during scraping
 SKIP_DOMAINS = [
     "drive.google.com",
     "support.google.com",
     "accounts.google.com",
 ]
 
-REQUEST_TIMEOUT     = 15                          # seconds per request
-DELAY_BETWEEN       = 1.0                         # seconds between requests
+REQUEST_TIMEOUT     = 15
+DELAY_BETWEEN       = 1.0
 
 # ══════════════════════════════════════════════════════════════════
 # CHUNKER CONFIGURATION
 # ══════════════════════════════════════════════════════════════════
 
-CHUNK_SIZE          = 512                         # max tokens per chunk
-CHUNK_OVERLAP       = 50                          # token overlap between chunks
-MIN_CHUNK_SIZE      = 50                          # minimum tokens, merge if smaller
+CHUNK_SIZE          = 512
+CHUNK_OVERLAP       = 50
+MIN_CHUNK_SIZE      = 50
 
-# Chunk types
 CHUNK_TYPES = [
-    "text",                                       # regular paragraph content
-    "table",                                      # markdown table content
-    "image",                                      # OCR'd image content
-    "reference_link",                             # external/sheet link metadata
-    "restricted_doc",                             # blocked doc metadata
-    "section_index",                              # section navigation index
+    "text",
+    "table",
+    "image",
+    "reference_link",
+    "restricted_doc",
+    "section_index",
 ]
 
 # ══════════════════════════════════════════════════════════════════
 # HYDE CONFIGURATION
 # ══════════════════════════════════════════════════════════════════
 
-HYDE_QUESTIONS_PER_CHUNK = 3                      # questions to generate per chunk
-HYDE_SKIP_TYPES = [                               # don't generate HyDE for these
+HYDE_QUESTIONS_PER_CHUNK = 3
+HYDE_SKIP_TYPES = [
     "section_index",
     "restricted_doc",
 ]
@@ -164,12 +138,13 @@ Rules:
 - Cover different aspects of the content
 - Do not repeat similar questions
 - Return ONLY the questions, one per line, no numbering"""
+
 # ══════════════════════════════════════════════════════════════════
 # IMAGE SCANNER CONFIGURATION
 # ══════════════════════════════════════════════════════════════════
 
-IMAGE_SCAN_ALL      = True                        # scan every image, no skipping
-IMAGE_MIN_SIZE_KB   = 1                           # still scan but flag if very small
+IMAGE_SCAN_ALL      = True
+IMAGE_MIN_SIZE_KB   = 1
 
 IMAGE_PROMPT = """This image is from an IITM BS (IIT Madras BS Degree) programme document.
 Section: {section}
@@ -185,7 +160,7 @@ Analyze this image and:
 Be thorough and extract every piece of information visible."""
 
 # ══════════════════════════════════════════════════════════════════
-# PATHS — all output locations
+# PATHS
 # ══════════════════════════════════════════════════════════════════
 
 BASE_DIR            = Path(__file__).parent
@@ -195,7 +170,6 @@ LINKED_DIR          = DOCS_DIR / "linked_docs"
 IMAGES_DIR          = OUTPUT_DIR / "images"
 CHUNKS_DIR          = OUTPUT_DIR / "chunks"
 
-# Output files
 CHECKPOINT_FILE     = OUTPUT_DIR / "checkpoint.json"
 SKIPPED_LOG         = OUTPUT_DIR / "skipped_links.log"
 IMAGE_METADATA_FILE = OUTPUT_DIR / "image_metadata.json"
@@ -226,42 +200,24 @@ Rules:
 6. Never make up information
 7. If answer is in an external sheet or link — provide that link directly"""
 
-# RAG streaming
 STREAM_RESPONSE     = True
-
-# ══════════════════════════════════════════════════════════════════
-# SCHEDULER CONFIGURATION
-# ══════════════════════════════════════════════════════════════════
-
-SCRAPE_INTERVAL_WEEKS = 13                        # every 3 months
-
-# ══════════════════════════════════════════════════════════════════
-# LOGGING
-# ══════════════════════════════════════════════════════════════════
+SCRAPE_INTERVAL_WEEKS = 13
 
 LOG_LEVEL           = "INFO"
 LOG_FORMAT          = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 
 # ══════════════════════════════════════════════════════════════════
-# VALIDATION — catch missing config on startup
+# VALIDATION
 # ══════════════════════════════════════════════════════════════════
 
 def validate():
-    """Call this at startup of any pipeline stage."""
     errors = []
 
     if not USE_LOCAL_LLM and not LLM_API_KEY:
         errors.append("GROQ_API_KEY environment variable not set")
 
-    if not NOMIC_API_KEY:
-        errors.append("VOYAGE_API_KEY environment variable not set")
-
-    if not QDRANT_URL or QDRANT_URL == f"http://{QDRANT_HOST}:{QDRANT_PORT}":
-        import socket
-        try:
-            socket.connect_ex(("localhost", QDRANT_PORT))
-        except Exception:
-            errors.append(f"Qdrant not reachable at {QDRANT_HOST}:{QDRANT_PORT}")
+    if not GEMINI_API_KEY:
+        errors.append("GEMINI_API_KEY environment variable not set")
 
     if errors:
         print("\n❌ Configuration errors:")
@@ -271,12 +227,10 @@ def validate():
 
     print(f"\n✅ Config loaded:")
     print(f"   LLM:        {LLM_PROVIDER} → {LLM_MODEL}")
-    print(f"   Embeddings: {EMBEDDING_MODEL} (Voyage AI)")
-    print(f"   Reranker:   {RERANKER_MODEL} (Voyage AI)")
+    print(f"   Embeddings: {EMBEDDING_MODEL} (Gemini)")
     print(f"   Vector DB:  {QDRANT_URL}/{QDRANT_COLLECTION}")
     print(f"   Mode:       {'🔒 Private (local)' if USE_LOCAL_LLM else '🌐 Public (API)'}")
 
 
 if __name__ == "__main__":
     validate()
-

@@ -1,29 +1,16 @@
 """
 IITM BS RAG Pipeline — Stage 6: Uploader
 ==========================================
-INPUT:  output/chunks/all_chunks_embedded.json  (from embedder.py)
-OUTPUT: Qdrant collection "iitm_bs" (cloud or local)
+INPUT:  output/chunks/all_chunks_embedded.json
+OUTPUT: Qdrant collection "iitm_bs"
 
-What it does:
-  - Wipes and recreates Qdrant collection fresh (Plan A)
-  - Sets up hybrid search: dense vectors + BM25 sparse vectors
-  - Uploads all chunks with complete payload (all new fields)
-  - Uses chunk_id hash as Qdrant point ID (stable across re-runs)
-  - Creates payload indexes for fast filtering
-  - Runs test searches (vector + hybrid) to verify
-
-Hybrid search weights (from config):
-  VECTOR_WEIGHT = 0.7  (semantic — finds meaning)
-  BM25_WEIGHT   = 0.3  (keyword — finds exact terms)
-
-Run:
-  python uploader.py
+Provider: Google Gemini (text-embedding-004, dim=768)
 """
 
 import json
 import hashlib
 import logging
-import voyageai
+import google.generativeai as genai
 from pathlib import Path
 from tqdm import tqdm
 from qdrant_client import QdrantClient
@@ -42,7 +29,7 @@ from config import (
     QDRANT_URL,
     QDRANT_API_KEY,
     QDRANT_COLLECTION,
-    VOYAGE_API_KEY,
+    GEMINI_API_KEY,
     EMBEDDING_MODEL,
     EMBEDDING_DIM,
     VECTOR_WEIGHT,
@@ -55,60 +42,23 @@ from config import (
 logging.basicConfig(level=LOG_LEVEL, format=LOG_FORMAT)
 logger = logging.getLogger("uploader")
 
-# ══════════════════════════════════════════════════════════════════
-# PATHS
-# ══════════════════════════════════════════════════════════════════
-
 EMBEDDED_FILE = ALL_CHUNKS_FILE.parent / "all_chunks_embedded.json"
 BATCH_SIZE    = 100
 
 
-# ══════════════════════════════════════════════════════════════════
-# CHUNK ID → QDRANT POINT ID
-# Qdrant needs integer or UUID as point ID.
-# We convert our 12-char hex chunk_id to a stable integer
-# by taking first 8 hex chars → integer.
-# This is stable across re-runs unlike sequential i.
-# ══════════════════════════════════════════════════════════════════
-
 def chunk_id_to_point_id(chunk_id: str) -> int:
-    """
-    Convert 12-char hex chunk_id to stable integer for Qdrant.
-    Uses MD5 of chunk_id to get full 32-char hex → take first 8 → int.
-    Collision probability is negligible for typical chunk counts.
-    """
     full_hash = hashlib.md5(chunk_id.encode()).hexdigest()
     return int(full_hash[:8], 16)
 
 
-# ══════════════════════════════════════════════════════════════════
-# PAYLOAD BUILDER
-# All new fields included — nothing missing
-# ══════════════════════════════════════════════════════════════════
-
 def build_payload(chunk: dict) -> dict:
-    """
-    INPUT:  chunk dict (without embedding)
-    OUTPUT: complete payload dict for Qdrant
-
-    Includes ALL fields from the rebuilt pipeline:
-    hyde_questions, parent_doc, references, created_at,
-    version, what_it_contains, when_to_refer, access,
-    image_content, found_in_doc
-    """
     chunk_type = chunk.get("chunk_type", "text")
 
-    # Base payload — every chunk type
     payload = {
-        # Identity
         "chunk_id":       chunk.get("chunk_id", ""),
         "chunk_type":     chunk_type,
-
-        # Content
         "content":        chunk.get("content", ""),
         "embed_text":     chunk.get("embed_text", ""),
-
-        # Location
         "heading":        chunk.get("heading", ""),
         "heading_level":  chunk.get("heading_level", 0),
         "doc_title":      chunk.get("doc_title", ""),
@@ -116,22 +66,12 @@ def build_payload(chunk: dict) -> dict:
         "breadcrumb":     chunk.get("breadcrumb", ""),
         "source_url":     chunk.get("source_url", ""),
         "parent_doc":     chunk.get("parent_doc", ""),
-
-        # Relations
         "references":     chunk.get("references", []),
-
-        # HyDE questions — used at retrieval time
         "hyde_questions": chunk.get("hyde_questions", []),
-
-        # Versioning
         "created_at":     chunk.get("created_at", ""),
         "version":        chunk.get("version", "1"),
-
-        # Stats
         "token_count":    chunk.get("token_count", 0),
     }
-
-    # ── Type-specific fields ──────────────────────────────────────
 
     if chunk_type == "image":
         payload["image_file"]    = chunk.get("image_file", "")
@@ -158,20 +98,7 @@ def build_payload(chunk: dict) -> dict:
     return payload
 
 
-# ══════════════════════════════════════════════════════════════════
-# COLLECTION SETUP
-# Hybrid search: dense vector + BM25 sparse vector
-# ══════════════════════════════════════════════════════════════════
-
 def setup_collection(client: QdrantClient):
-    """
-    INPUT:  Qdrant client
-    OUTPUT: fresh collection with hybrid search configured
-
-    Always wipes and recreates — Plan A decision.
-    Dense vector: cosine similarity (semantic search)
-    Sparse vector: BM25 (keyword search)
-    """
     existing = [c.name for c in client.get_collections().collections]
     if QDRANT_COLLECTION in existing:
         client.delete_collection(QDRANT_COLLECTION)
@@ -181,38 +108,23 @@ def setup_collection(client: QdrantClient):
         collection_name=QDRANT_COLLECTION,
         vectors_config={
             "dense": VectorParams(
-                size=EMBEDDING_DIM,        # 1024 for voyage-3
+                size=EMBEDDING_DIM,
                 distance=Distance.COSINE,
             )
         },
         sparse_vectors_config={
             "sparse": SparseVectorParams(
-                index=SparseIndexParams(
-                    on_disk=False,
-                )
+                index=SparseIndexParams(on_disk=False)
             )
         },
     )
     print(f"  ✅ Created collection: {QDRANT_COLLECTION}")
-    print(f"     Dense:  {EMBEDDING_DIM}d cosine (voyage-3 semantic)")
+    print(f"     Dense:  {EMBEDDING_DIM}d cosine (Gemini text-embedding-004)")
     print(f"     Sparse: BM25 (keyword)")
     print(f"     Weights: vector={VECTOR_WEIGHT}, bm25={BM25_WEIGHT}")
 
 
-# ══════════════════════════════════════════════════════════════════
-# BM25 SPARSE VECTOR BUILDER
-# Simple TF-IDF approximation for BM25 sparse vectors
-# ══════════════════════════════════════════════════════════════════
-
 def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
-    """
-    INPUT:  text string
-    OUTPUT: (indices, values) for sparse vector
-
-    Simple term frequency approach for BM25.
-    Each unique word gets a stable index (hash-based).
-    Value = term frequency normalized.
-    """
     import re
     from collections import Counter
 
@@ -235,17 +147,12 @@ def build_sparse_vector(text: str) -> tuple[list[int], list[float]]:
     return list(index_map.keys()), [float(v) for v in index_map.values()]
 
 
-# ══════════════════════════════════════════════════════════════════
-# MAIN
-# ══════════════════════════════════════════════════════════════════
-
 def run():
     print("\n" + "═" * 65)
     print("  IITM BS RAG Pipeline — Stage 6: Uploader")
-    print("  Embedding provider: Voyage AI (voyage-3)")
+    print("  Embedding provider: Google Gemini (text-embedding-004)")
     print("═" * 65)
 
-    # Load embedded chunks
     if not EMBEDDED_FILE.exists():
         print(f"\n  ❌ {EMBEDDED_FILE} not found")
         print(f"     Run python embedder.py first")
@@ -256,13 +163,11 @@ def run():
         chunks = json.load(f)
     print(f"  Loaded {len(chunks)} chunks")
 
-    # Verify embeddings present and correct dimension
     missing_emb = sum(1 for c in chunks if "embedding" not in c)
     if missing_emb:
         print(f"  ❌ {missing_emb} chunks missing embeddings — run embedder.py first")
         return
 
-    # Check embedding dimension matches config
     sample_emb = next(c for c in chunks if "embedding" in c)
     actual_dim = len(sample_emb["embedding"])
     if actual_dim != EMBEDDING_DIM:
@@ -272,7 +177,6 @@ def run():
 
     print(f"  ✅ All chunks have embeddings (dim={actual_dim})")
 
-    # Connect to Qdrant
     print(f"\n  Connecting to Qdrant at {QDRANT_URL}...")
     qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=30)
     try:
@@ -282,11 +186,9 @@ def run():
         print(f"  ❌ Cannot connect: {e}")
         return
 
-    # Setup collection (wipe + recreate)
     print(f"\n  Setting up collection...")
     setup_collection(qdrant)
 
-    # Build and upload points
     print(f"\n  Building {len(chunks)} points...")
 
     points        = []
@@ -298,16 +200,13 @@ def run():
         chunk_id  = chunk.get("chunk_id", "")
         point_id  = chunk_id_to_point_id(chunk_id)
 
-        # Check for ID collision (extremely rare)
         if point_id in id_map:
             logger.warning(f"ID collision: {chunk_id} and {id_map[point_id]} → {point_id}")
             id_collisions += 1
         id_map[point_id] = chunk_id
 
-        # Build sparse vector for BM25
         content_text = chunk.get("embed_text", chunk.get("content", ""))
         sparse_indices, sparse_values = build_sparse_vector(content_text)
-
         payload = build_payload(chunk)
 
         points.append(PointStruct(
@@ -322,19 +221,11 @@ def run():
             payload = payload,
         ))
 
-    if id_collisions:
-        logger.warning(f"Total ID collisions: {id_collisions} (negligible)")
-
-    # Upload in batches
     print(f"\n  Uploading to Qdrant in batches of {BATCH_SIZE}...")
     for i in tqdm(range(0, len(points), BATCH_SIZE), desc="  Uploading"):
         batch = points[i:i + BATCH_SIZE]
-        qdrant.upsert(
-            collection_name=QDRANT_COLLECTION,
-            points=batch,
-        )
+        qdrant.upsert(collection_name=QDRANT_COLLECTION, points=batch)
 
-    # Create payload indexes for fast filtering
     print(f"\n  Creating payload indexes...")
     index_fields = [
         ("chunk_type",    PayloadSchemaType.KEYWORD),
@@ -351,20 +242,18 @@ def run():
                 field_name=field,
                 field_schema=schema,
             )
-            logger.info(f"Index created: {field}")
         except Exception as e:
             logger.warning(f"Index {field} skipped: {e}")
 
-    # Verify upload
     info  = qdrant.get_collection(QDRANT_COLLECTION)
     count = info.points_count
     print(f"\n  ✅ Upload complete!")
     print(f"     Collection: {QDRANT_COLLECTION}")
     print(f"     Points:     {count}")
 
-    # ── Test searches using Voyage AI ─────────────────────────────
-    print(f"\n  Running test searches via Voyage AI...")
-    voyage = voyageai.Client(api_key=VOYAGE_API_KEY)
+    # ── Test searches using Gemini ────────────────────────────────
+    print(f"\n  Running test searches via Gemini...")
+    genai.configure(api_key=GEMINI_API_KEY)
 
     test_queries = [
         "eligibility criteria for foundation level admission",
@@ -374,14 +263,12 @@ def run():
 
     for query in test_queries:
         print(f"\n  Query: '{query}'")
-
-        # Embed with Voyage AI — input_type="query" for search time
-        result = voyage.embed(
-            [query],
+        result = genai.embed_content(
             model=EMBEDDING_MODEL,
-            input_type="query",
+            content=query,
+            task_type="retrieval_query",
         )
-        vec = result.embeddings[0]
+        vec = result["embedding"]
 
         results = qdrant.query_points(
             collection_name=QDRANT_COLLECTION,
@@ -395,7 +282,6 @@ def run():
         for r in results:
             print(f"    [{r.score:.3f}] {r.payload.get('chunk_type',''):15s} | {r.payload.get('breadcrumb','')[:50]}")
 
-    # ── Summary ───────────────────────────────────────────────────
     type_counts = {}
     for chunk in chunks:
         t = chunk.get("chunk_type", "text")
@@ -404,11 +290,11 @@ def run():
     print(f"\n  {'═' * 40}")
     print(f"  Collection:     {QDRANT_COLLECTION}")
     print(f"  Total points:   {count}")
-    print(f"  Embedding dim:  {actual_dim} (voyage-3)")
+    print(f"  Embedding dim:  {actual_dim} (Gemini text-embedding-004)")
     for t, c in sorted(type_counts.items()):
         print(f"    {t:20s}: {c}")
     print(f"\n  Hybrid search: vector({VECTOR_WEIGHT}) + BM25({BM25_WEIGHT})")
-    print(f"\n  Next step: python main.py (or uvicorn main:app)")
+    print(f"\n  Next step: uvicorn main:app --port 8000")
     print("═" * 65)
 
 

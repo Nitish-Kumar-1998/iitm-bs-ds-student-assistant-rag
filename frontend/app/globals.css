@@ -1,4 +1,15 @@
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+@import "tailwindcss";
+
+*, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; overflow: hidden; }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; background: #212121; }
+
+/* Hide Next.js dev indicator */
+nextjs-portal { display: none; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeUp {
+  animation: fadeUp 0.2s ease forwards;
+}

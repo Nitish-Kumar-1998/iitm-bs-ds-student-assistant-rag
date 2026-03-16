@@ -20,4 +20,6 @@ qdrant_storage/
 #app output
 
 app/output/
-
+storage/
+storage/
+qdrant
