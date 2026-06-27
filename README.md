@@ -1,28 +1,29 @@
-# 🚀 Local Setup Guide — IITM BS RAG Assistant
+# 🚀 IITM BS RAG Assistant
 
-This guide walks you through setting up the entire RAG system on your machine for development.
+A RAG-powered AI assistant that helps IITM BS Data Science students answer academic queries using official programme documents.
 
 ---
 
-## ⚙️ Prerequisites
+## ⚡ Quick Start (5 Minutes)
 
-Before starting, ensure you have:
+### Prerequisites
+You need **3 things installed**:
 
-1. **Python 3.11+** — [Download](https://www.python.org/downloads/)
-2. **Node.js 18+** — [Download](https://nodejs.org/)
+1. **Docker Desktop** — [Download](https://www.docker.com/products/docker-desktop)
+   - This runs the backend + database in containers
+   - No need to install Python separately!
+
+2. **Node.js** — [Download](https://nodejs.org/) (LTS version)
+   - For the frontend website
+
 3. **Git** — [Download](https://git-scm.com/)
-4. **Docker** (optional, for Qdrant) — [Download](https://www.docker.com/)
-
-### Check Installations
-```bash
-python --version      # Should be 3.11 or higher
-node --version        # Should be 18 or higher
-git --version         # Any recent version
-```
+   - To download the code
 
 ---
 
-## 📋 Step 1: Clone the Repository
+## 📥 Setup Steps
+
+### Step 1: Clone the Repository
 
 ```bash
 git clone https://github.com/Nitish-Kumar-1998/iitm-bs-ds-student-assistant-rag.git
@@ -31,273 +32,253 @@ cd iitm-bs-ds-student-assistant-rag
 
 ---
 
-## 🔑 Step 2: Get API Keys
+### Step 2: Get Your Free API Keys
 
-You need **two free API keys** to run this locally:
+**Groq API Key** (for AI answers):
+1. Go to https://console.groq.com/keys
+2. Sign up → Create API Key
+3. Copy the key
 
-### A. Groq API Key (LLM)
-1. Visit [console.groq.com](https://console.groq.com)
-2. Sign up with your email
-3. Go to **API Keys** section
-4. Create a new API key
-5. Copy it (you'll use it soon)
-
-### B. Google Gemini API Key (Embeddings)
-1. Visit [ai.google.dev](https://ai.google.dev)
-2. Click **Get API Key**
-3. Create a new project or use existing
-4. Generate an API key
-5. Copy it (you'll use it soon)
+**Gemini API Key** (for understanding questions):
+1. Go to https://ai.google.dev/
+2. Click "Get API Key" → Create
+3. Copy the key
 
 ---
 
-## 🗄️ Step 3: Set Up Qdrant (Vector Database)
+### Step 3: Create `.env` File
 
-### Option A: Using Docker (Recommended)
+Copy the example file and add your keys:
+
 ```bash
-# Pull and run Qdrant container
-docker run -d \
-  --name qdrant \
-  -p 6333:6333 \
-  -v qdrant_storage:/qdrant/storage \
-  qdrant/qdrant:latest
+# Copy template
+cp .env.example .env
 ```
 
-**Verify it's running:**
-```bash
-curl http://localhost:6333/health
-# Should return: {"ok":true}
+Then edit `.env` and replace:
 ```
-
-### Option B: Without Docker (Local Install)
-If you can't use Docker:
-1. Download from [github.com/qdrant/qdrant/releases](https://github.com/qdrant/qdrant/releases)
-2. Extract the binary
-3. Run it:
-   ```bash
-   ./qdrant
-   # Listens on http://localhost:6333
-   ```
-
----
-
-## 🐍 Step 4: Set Up Backend
-
-### 4.1 Create `.env` File
-In the **root directory** of the project, create a `.env` file:
-
-```bash
-# In the root folder, create .env
-cat > .env << 'EOF'
-GROQ_API_KEY=your_groq_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
-QDRANT_URL=http://localhost:6333
+GROQ_API_KEY=paste_your_groq_key_here
+GEMINI_API_KEY=paste_your_gemini_key_here
+QDRANT_URL=http://qdrant:6333
 QDRANT_API_KEY=
-EOF
 ```
 
-Replace `your_groq_api_key_here` and `your_gemini_api_key_here` with your actual keys.
+---
 
-### 4.2 Create Python Virtual Environment
+### Step 4: Start Backend + Database
+
 ```bash
-cd app
-python -m venv venv
-
-# Activate virtual environment
-# On macOS / Linux:
-source venv/bin/activate
-
-# On Windows (PowerShell):
-.\venv\Scripts\Activate.ps1
-
-# On Windows (Command Prompt):
-venv\Scripts\activate
+docker-compose up -d
 ```
 
-### 4.3 Install Dependencies
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+**What happens:**
+- Docker downloads and starts **2 containers**:
+  - `qdrant` = Vector database (stores programme data)
+  - `backend` = FastAPI server (answers questions)
+- Takes 30-60 seconds
 
-### 4.4 Run Backend Server
+**Verify it worked:**
 ```bash
-python main.py
-# Or:
-uvicorn main:app --reload --port 8000
+docker-compose ps
 ```
 
 You should see:
 ```
-✅ Gemini ready: models/gemini-embedding-001
-✅ Qdrant connected
-✅ LLM client ready: llama-3.3-70b-versatile
-✅ Backend ready
-INFO:     Uvicorn running on http://0.0.0.0:8000
+NAME      COMMAND      STATUS
+qdrant    "..."        Up (healthy)
+backend   "..."        Up
 ```
 
-**Backend is now running at:** `http://localhost:8000`
+✅ If both say "Up", you're good!
 
 ---
 
-## ⚛️ Step 5: Set Up Frontend
+### Step 5: Start Frontend
 
-### 5.1 Install Dependencies
-Open a **new terminal** (keep backend running in the first one):
+Open a **new terminal** in the same folder:
+
 ```bash
 cd frontend
 npm install
-```
-
-### 5.2 Start Dev Server
-```bash
 npm run dev
 ```
 
-You should see:
+Wait 1-2 minutes for it to start. You'll see:
 ```
   ▲ Next.js 16.1.6
   - Local:        http://localhost:3000
 ```
 
-**Frontend is now running at:** `http://localhost:3000`
+✅ Frontend is running!
 
 ---
 
-## 📚 Step 6: Load Data (One-Time Setup)
+### Step 6: Load Programme Data
 
-Once backend and frontend are running, you need to populate the vector database with programme documents.
+Open **another new terminal** in the root folder:
 
-### 6.1 Scrape Google Docs
+**On Mac/Linux:**
 ```bash
-cd app
-python scraper.py
+bash load_data.sh
 ```
 
-**What it does:**
-- Fetches official IITM BS Google Docs
-- Converts them to markdown
-- Saves to `app/output/docs/`
-- Takes 2-5 minutes
-
-**Output:**
-```
-✅ SCRAPING COMPLETE
-  Documents scraped:    2
-  Images saved:         15
-  Reference links:      45 (enriched)
-```
-
-### 6.2 Chunk Documents
+**On Windows:**
 ```bash
-python chunker.py
+load_data.bat
 ```
 
-**What it does:**
-- Splits documents into 512-char chunks with 50-char overlap
-- Extracts tables, images, reference links
-- Saves to `app/output/chunks/all_chunks.json`
+**What happens:**
+- Scrapes official IITM BS Google Docs
+- Splits documents into searchable chunks
+- Creates embeddings (AI converts text to vectors)
+- Uploads to database
 
-### 6.3 Generate Embeddings
-```bash
-python embedder.py
+**Expected output:**
+```
+================================
+Step 1/4: Scraping Google Docs...
+✅ Scraping complete
+
+Step 2/4: Chunking documents...
+✅ Chunking complete
+
+Step 3/4: Generating embeddings...
+✅ Embeddings complete
+
+Step 4/4: Uploading to Qdrant...
+✅ Upload complete
+
+🎉 Data pipeline complete!
+================================
 ```
 
-**What it does:**
-- Creates vector embeddings for each chunk using Gemini
-- Takes ~2-3 minutes
+This takes **5-10 minutes** (only runs once).
 
-### 6.4 Upload to Qdrant
+---
+
+## 🌐 Try It Out!
+
+1. Open your browser
+2. Go to: **http://localhost:3000**
+3. Ask a question like:
+   - *"What are the fees for BS degree?"*
+   - *"What courses are available?"*
+   - *"How long does the programme take?"*
+
+You'll see:
+- ✅ Streaming AI response
+- ✅ Source citations with links
+- ✅ Loading indicators
+
+---
+
+## 🛑 Stop Everything
+
+When you're done:
+
 ```bash
-python uploader.py
+docker-compose down
 ```
 
-**What it does:**
-- Pushes all chunks to Qdrant with both dense (vector) and sparse (BM25) indices
-- Ready for hybrid search
-
-**Verify:** Check Qdrant health
+To start again later:
 ```bash
-curl http://localhost:6333/collections/iitm_bs
-# Should show collection with points count
+docker-compose up -d
+npm run dev    # in frontend folder
 ```
 
 ---
 
-## 🧪 Step 7: Test Everything
+## 🐳 How Docker Works (Explanation)
 
-### Test Backend Health
-```bash
-curl http://localhost:8000/health
+**Without Docker:**
+- Install Python 3.11
+- Install FastAPI, Qdrant client, Gemini library, etc.
+- Run Qdrant locally
+- Set up virtual environment
+- Complex setup! 😵
+
+**With Docker:**
+- Docker containers = boxes with everything inside
+- Your `docker-compose.yml` says: "Create 2 boxes"
+- Box 1: Python + FastAPI + all libraries (backend)
+- Box 2: Qdrant database
+- Docker downloads everything automatically
+- You just run: `docker-compose up -d`
+- Simple! ✅
+
+**What you have:**
+```
+Your Computer
+├── Code (git clone)
+├── .env file (your API keys)
+├── docker-compose.yml (tells Docker what to run)
+└── Docker Desktop App (manages containers)
 ```
 
-Should return:
-```json
-{
-  "status": "ok",
-  "llm_provider": "groq",
-  "llm_model": "llama-3.3-70b-versatile",
-  "embed_model": "models/gemini-embedding-001",
-  "qdrant": "ok — 450 points"
-}
+When you run `docker-compose up -d`:
 ```
-
-### Test in Browser
-1. Open **http://localhost:3000**
-2. Type a question like: *"What are the fees for the BS degree?"*
-3. You should see:
-   - Streaming response from the LLM
-   - Source citations with links
-   - Loading indicators
+Docker reads docker-compose.yml
+  ↓
+Downloads backend image (contains Python + FastAPI + all libraries)
+  ↓
+Downloads Qdrant image
+  ↓
+Creates 2 containers from those images
+  ↓
+Starts them on your computer
+  ↓
+Now you can use http://localhost:8000 (backend)
+and http://localhost:6333 (database)
+```
 
 ---
 
-## 🛠️ Troubleshooting
+## 🆘 Troubleshooting
 
-### Backend won't start
-**Error:** `GROQ_API_KEY not set`
+### "Docker is not installed" or "docker: command not found"
 ```bash
-# Make sure .env is in the root folder (not app/)
-# Verify keys are correct:
-cat .env
+# Download and install Docker Desktop
+# https://www.docker.com/products/docker-desktop
+# Then restart your terminal
 ```
 
-**Error:** `Connection refused — localhost:6333`
+### "Backend container won't start"
 ```bash
-# Start Qdrant:
-docker start qdrant
-# Or verify it's running:
-docker ps | grep qdrant
+# Check Docker is running (open Docker Desktop)
+# Then check the error:
+docker-compose logs backend
+
+# Restart:
+docker-compose restart backend
 ```
 
-### Frontend won't load
-**Error:** `Failed to fetch from /ask`
-```bash
-# Ensure backend is running:
-curl http://localhost:8000/health
-
-# Check frontend is pointing to correct backend:
-# In frontend/hooks/useChat.ts, verify API_URL = 'http://localhost:8000'
-```
-
-**Error:** `npm: command not found`
+### "npm: command not found"
 ```bash
 # Install Node.js from https://nodejs.org/
-node --version  # Verify
+# Then restart terminal
 ```
 
-### Qdrant connection fails
-**Error:** `Connection refused`
+### "Failed to fetch from backend"
 ```bash
-# Check if Qdrant is running:
-curl http://localhost:6333/health
+# Make sure backend is running:
+docker-compose ps
 
 # If not, start it:
-docker run -d -p 6333:6333 qdrant/qdrant:latest
+docker-compose up -d
 
-# Wait 5 seconds, then test again
-sleep 5
-curl http://localhost:6333/health
+# Wait 10 seconds then refresh browser
+```
+
+### "API keys not working"
+```bash
+# Make sure .env file exists and has your real keys:
+cat .env
+
+# Should show your actual keys, not placeholders
+# If not, edit .env with correct keys
+
+# Restart backend:
+docker-compose restart backend
 ```
 
 ---
@@ -305,124 +286,86 @@ curl http://localhost:6333/health
 ## 📁 Project Structure
 
 ```
-.
-├── app/                    # Backend (Python/FastAPI)
-│   ├── main.py            # API server
-│   ├── config.py          # Settings
-│   ├── scraper.py         # Download docs
-│   ├── chunker.py         # Split documents
-│   ├── embedder.py        # Create embeddings
-│   ├── uploader.py        # Push to Qdrant
-│   ├── requirements.txt    # Python dependencies
-│   └── output/            # Generated files (chunks, images, etc.)
+iitm-bs-ds-student-assistant-rag/
+├── app/                      # Backend (Python/FastAPI)
+│   ├── main.py              # API server
+│   ├── scraper.py           # Download docs
+│   ├── chunker.py           # Split documents
+│   ├── embedder.py          # Create embeddings
+│   ├── uploader.py          # Upload to Qdrant
+│   └── requirements.txt      # Python dependencies
 │
-├── frontend/              # Frontend (Next.js/React)
+├── frontend/                # Frontend (Next.js/React)
 │   ├── app/
-│   │   └── page.tsx       # Main chat interface
-│   ├── components/        # React components
-│   ├── hooks/             # useChat hook for API calls
-│   ├── package.json       # Node dependencies
-│   └── next.config.ts     # Next.js config
+│   │   └── page.tsx         # Chat interface
+│   ├── components/          # UI components
+│   └── package.json         # Node dependencies
 │
-├── .env                   # API keys (create this!)
-├── Dockerfile             # Docker image definition
-└── README.md              # This file
+├── docker-compose.yml       # Docker config (runs containers)
+├── Dockerfile               # How to build backend container
+├── .env.example            # Template for API keys
+├── load_data.sh            # Automation for Mac/Linux
+├── load_data.bat           # Automation for Windows
+└── README.md               # This file
 ```
 
 ---
 
-## 🚀 Common Commands
+## 🎯 Common Commands
 
-### Start Everything (after first-time setup)
-
-**Terminal 1 - Backend:**
 ```bash
-cd app
-source venv/bin/activate  # or: .\venv\Scripts\activate
-python main.py
+# Start everything
+docker-compose up -d
+
+# Check status
+docker-compose ps
+
+# View logs
+docker-compose logs backend
+docker-compose logs qdrant
+
+# Stop everything
+docker-compose down
+
+# Restart a service
+docker-compose restart backend
+
+# Load data (Mac/Linux)
+bash load_data.sh
+
+# Load data (Windows)
+load_data.bat
+
+# Start frontend
+cd frontend && npm run dev
+
+# Delete all data and restart
+docker-compose down -v
+docker-compose up -d
 ```
-
-**Terminal 2 - Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-**Terminal 3 - Monitor (optional):**
-```bash
-# Check if services are running
-curl http://localhost:8000/health    # Backend
-curl http://localhost:3000            # Frontend (in browser)
-```
-
-### Clear and Restart
-```bash
-# Clear all generated data
-rm -rf app/output
-rm -rf app/output/chunks
-
-# Restart services
-# (make sure Qdrant is still running)
-
-# Re-run pipeline
-cd app
-python scraper.py && python chunker.py && python embedder.py && python uploader.py
-```
-
-### Run Tests/Evaluation
-```bash
-cd app
-python evaluator.py
-# Generates: eval_report.json with retrieval + answer quality metrics
-```
-
----
-
-## 📊 Environment Variables Explained
-
-| Variable | Purpose | Example |
-|----------|---------|---------|
-| `GROQ_API_KEY` | LLM API for generating answers | `gsk_xxxxx...` |
-| `GEMINI_API_KEY` | Google Gemini for embeddings | `AIzaSy...` |
-| `QDRANT_URL` | Vector database connection | `http://localhost:6333` |
-| `QDRANT_API_KEY` | Qdrant auth (empty for local) | `` |
 
 ---
 
 ## ✅ Success Checklist
 
-After setup, verify:
-
-- [ ] Backend starts without errors (`python main.py`)
-- [ ] Frontend loads (`http://localhost:3000`)
-- [ ] Backend health check passes (`curl http://localhost:8000/health`)
-- [ ] Qdrant is running (`curl http://localhost:6333/health`)
-- [ ] Data pipeline completed (all scripts ran)
-- [ ] You can ask a question and get a response
-- [ ] Responses include source citations
+- [ ] Docker Desktop installed and running
+- [ ] Node.js installed (`node --version` works)
+- [ ] Repository cloned
+- [ ] `.env` file created with your API keys
+- [ ] `docker-compose up -d` shows 2 containers up
+- [ ] `npm run dev` starts frontend at localhost:3000
+- [ ] `load_data.sh` (or `.bat`) runs without errors
+- [ ] Can ask questions and get answers at localhost:3000
 
 ---
 
 ## 📞 Need Help?
 
-If something doesn't work:
-
-1. **Check logs** — Look at terminal output for error messages
-2. **Verify ports** — Ensure 3000 (frontend), 8000 (backend), 6333 (Qdrant) are free
-3. **Check API keys** — Make sure `.env` has valid Groq + Gemini keys
-4. **Restart services** — Kill and restart backend/frontend
-5. **Docker issues** — Try `docker restart qdrant`
-
----
-
-## 🎯 Next Steps
-
-Once everything is running locally:
-
-- **Modify system prompt** → Edit `SYSTEM_PROMPT` in `app/main.py`
-- **Customize UI** → Edit components in `frontend/components/`
-- **Add new features** → Add endpoints to `app/main.py`
-- **Deploy** → Use Docker compose or cloud platforms (Vercel for frontend, Railway/Render for backend)
+1. Check the logs: `docker-compose logs backend`
+2. Make sure Docker Desktop is running
+3. Verify `.env` has correct API keys
+4. Try restarting: `docker-compose restart backend`
+5. Check official docs: https://study.iitm.ac.in/ds/
 
 ---
 
