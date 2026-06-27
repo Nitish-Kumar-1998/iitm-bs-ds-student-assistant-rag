@@ -364,9 +364,7 @@ docker-compose up -d
 1. Check the logs: `docker-compose logs backend`
 2. Make sure Docker Desktop is running
 3. Verify `.env` has correct API keys
-4. Try restarting: `docker-compose restart backend`
-5. Check official docs: https://study.iitm.ac.in/ds/
-
+4. Try restarting: `docker-compose restart backend
 ---
 
 **Happy coding! 🎉**
