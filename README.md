@@ -1,27 +1,54 @@
-# 🚀 IITM BS RAG Assistant
+# 🎓 IITM BS RAG Assistant
 
-A RAG-powered AI assistant that helps IITM BS Data Science students answer academic queries using official programme documents.
+A RAG-powered AI assistant that helps IITM BS Data Science students get instant answers from official programme documents.
+
+🌐 **Live App:** https://iitm-bs-ds-student-assistant-rag.vercel.app/
+⚙️ **Backend API:** https://iitm-bs-ds-student-assistant-rag.onrender.com
 
 ---
 
-## ⚡ Quick Start (5 Minutes)
+## 🧠 How It Works
+
+```
+Your Question
+     ↓
+Gemini Embeddings (convert question to vector)
+     ↓
+Qdrant Vector DB (hybrid search: 70% vector + 30% BM25)
+     ↓
+Top 20 relevant chunks retrieved
+     ↓
+Groq LLM — llama-3.3-70b-versatile (generates answer)
+     ↓
+Streaming response with source citations
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | Next.js 16, React 19, TypeScript |
+| Backend | FastAPI, Python 3.11, Uvicorn |
+| Vector DB | Qdrant v1.17.0 |
+| LLM | Groq — llama-3.3-70b-versatile |
+| Embeddings | Gemini — models/gemini-embedding-001 (3072 dim) |
+| Search | Hybrid: vector (0.7) + BM25 (0.3) |
+| Containers | Docker, Docker Compose |
+| CI/CD | GitHub Actions → Render (auto-deploy on push) |
+
+---
+
+## ⚡ Quick Start (Local)
 
 ### Prerequisites
-You need **3 things installed**:
 
-1. **Docker Desktop** — [Download](https://www.docker.com/products/docker-desktop)
-   - This runs the backend + database in containers
-   - No need to install Python separately!
-
-2. **Node.js** — [Download](https://nodejs.org/) (LTS version)
-   - For the frontend website
-
-3. **Git** — [Download](https://git-scm.com/)
-   - To download the code
+- [Docker Desktop](https://www.docker.com/products/docker-desktop)
+- [Node.js 22+](https://nodejs.org/) (LTS)
+- [Git](https://git-scm.com/)
 
 ---
-
-## 📥 Setup Steps
 
 ### Step 1: Clone the Repository
 
@@ -34,31 +61,26 @@ cd iitm-bs-ds-student-assistant-rag
 
 ### Step 2: Get Your Free API Keys
 
-**Groq API Key** (for AI answers):
+**Groq API Key** (LLM):
 1. Go to https://console.groq.com/keys
 2. Sign up → Create API Key
-3. Copy the key
 
-**Gemini API Key** (for understanding questions):
+**Gemini API Key** (Embeddings):
 1. Go to https://ai.google.dev/
 2. Click "Get API Key" → Create
-3. Copy the key
 
 ---
 
 ### Step 3: Create `.env` File
 
-Copy the example file and add your keys:
-
 ```bash
-# Copy template
 cp .env.example .env
 ```
 
-Then edit `.env` and replace:
+Edit `.env`:
 ```
-GROQ_API_KEY=paste_your_groq_key_here
-GEMINI_API_KEY=paste_your_gemini_key_here
+GROQ_API_KEY=your_groq_key_here
+GEMINI_API_KEY=your_gemini_key_here
 QDRANT_URL=http://qdrant:6333
 QDRANT_API_KEY=
 ```
@@ -68,34 +90,46 @@ QDRANT_API_KEY=
 ### Step 4: Start Backend + Database
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
-**What happens:**
-- Docker downloads and starts **2 containers**:
-  - `qdrant` = Vector database (stores programme data)
-  - `backend` = FastAPI server (answers questions)
-- Takes 30-60 seconds
-
-**Verify it worked:**
+Verify:
 ```bash
-docker-compose ps
+docker compose ps
 ```
 
-You should see:
+Expected output:
 ```
-NAME      COMMAND      STATUS
-qdrant    "..."        Up (healthy)
-backend   "..."        Up
+NAME      STATUS
+qdrant    Up (healthy)
+backend   Up (healthy)
 ```
-
-✅ If both say "Up", you're good!
 
 ---
 
-### Step 5: Start Frontend
+### Step 5: Load Programme Data
 
-Open a **new terminal** in the same folder:
+**Mac/Linux:**
+```bash
+bash load_data.sh
+```
+
+**Windows:**
+```bash
+load_data.bat
+```
+
+This runs once and takes 5–10 minutes. It:
+- Scrapes official IITM BS Google Docs
+- Chunks documents into 591 searchable pieces
+- Generates Gemini embeddings
+- Uploads to Qdrant
+
+> ⚠️ Gemini free tier allows 1000 embed requests/day. If it fails, wait 24 hours and retry.
+
+---
+
+### Step 6: Start Frontend
 
 ```bash
 cd frontend
@@ -103,183 +137,35 @@ npm install
 npm run dev
 ```
 
-Wait 1-2 minutes for it to start. You'll see:
+Create `frontend/.env.local`:
 ```
-  ▲ Next.js 16.1.6
-  - Local:        http://localhost:3000
-```
-
-✅ Frontend is running!
-
----
-
-### Step 6: Load Programme Data
-
-Open **another new terminal** in the root folder:
-
-**On Mac/Linux:**
-```bash
-bash load_data.sh
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-**On Windows:**
-```bash
-load_data.bat
-```
-
-**What happens:**
-- Scrapes official IITM BS Google Docs
-- Splits documents into searchable chunks
-- Creates embeddings (AI converts text to vectors)
-- Uploads to database
-
-**Expected output:**
-```
-================================
-Step 1/4: Scraping Google Docs...
-✅ Scraping complete
-
-Step 2/4: Chunking documents...
-✅ Chunking complete
-
-Step 3/4: Generating embeddings...
-✅ Embeddings complete
-
-Step 4/4: Uploading to Qdrant...
-✅ Upload complete
-
-🎉 Data pipeline complete!
-================================
-```
-
-This takes **5-10 minutes** (only runs once).
-
----
-
-## 🌐 Try It Out!
-
-1. Open your browser
-2. Go to: **http://localhost:3000**
-3. Ask a question like:
-   - *"What are the fees for BS degree?"*
-   - *"What courses are available?"*
-   - *"How long does the programme take?"*
-
-You'll see:
-- ✅ Streaming AI response
-- ✅ Source citations with links
-- ✅ Loading indicators
+Open **http://localhost:3000** and start asking questions!
 
 ---
 
 ## 🛑 Stop Everything
 
-When you're done:
-
 ```bash
-docker-compose down
-```
-
-To start again later:
-```bash
-docker-compose up -d
-npm run dev    # in frontend folder
+docker compose down        # stop containers (data preserved)
+docker compose down -v     # stop + delete all data (need to re-run load_data.sh)
 ```
 
 ---
 
-## 🐳 How Docker Works (Explanation)
+## 🔄 Start Again Later
 
-**Without Docker:**
-- Install Python 3.11
-- Install FastAPI, Qdrant client, Gemini library, etc.
-- Run Qdrant locally
-- Set up virtual environment
-- Complex setup! 😵
-
-**With Docker:**
-- Docker containers = boxes with everything inside
-- Your `docker-compose.yml` says: "Create 2 boxes"
-- Box 1: Python + FastAPI + all libraries (backend)
-- Box 2: Qdrant database
-- Docker downloads everything automatically
-- You just run: `docker-compose up -d`
-- Simple! ✅
-
-**What you have:**
-```
-Your Computer
-├── Code (git clone)
-├── .env file (your API keys)
-├── docker-compose.yml (tells Docker what to run)
-└── Docker Desktop App (manages containers)
-```
-
-When you run `docker-compose up -d`:
-```
-Docker reads docker-compose.yml
-  ↓
-Downloads backend image (contains Python + FastAPI + all libraries)
-  ↓
-Downloads Qdrant image
-  ↓
-Creates 2 containers from those images
-  ↓
-Starts them on your computer
-  ↓
-Now you can use http://localhost:8000 (backend)
-and http://localhost:6333 (database)
-```
-
----
-
-## 🆘 Troubleshooting
-
-### "Docker is not installed" or "docker: command not found"
 ```bash
-# Download and install Docker Desktop
-# https://www.docker.com/products/docker-desktop
-# Then restart your terminal
+# Terminal 1
+docker compose up -d
+
+# Terminal 2
+cd frontend && npm run dev
 ```
 
-### "Backend container won't start"
-```bash
-# Check Docker is running (open Docker Desktop)
-# Then check the error:
-docker-compose logs backend
-
-# Restart:
-docker-compose restart backend
-```
-
-### "npm: command not found"
-```bash
-# Install Node.js from https://nodejs.org/
-# Then restart terminal
-```
-
-### "Failed to fetch from backend"
-```bash
-# Make sure backend is running:
-docker-compose ps
-
-# If not, start it:
-docker-compose up -d
-
-# Wait 10 seconds then refresh browser
-```
-
-### "API keys not working"
-```bash
-# Make sure .env file exists and has your real keys:
-cat .env
-
-# Should show your actual keys, not placeholders
-# If not, edit .env with correct keys
-
-# Restart backend:
-docker-compose restart backend
-```
+No need to run `load_data.sh` again — data persists in the Docker volume.
 
 ---
 
@@ -287,26 +173,28 @@ docker-compose restart backend
 
 ```
 iitm-bs-ds-student-assistant-rag/
-├── app/                      # Backend (Python/FastAPI)
-│   ├── main.py              # API server
-│   ├── scraper.py           # Download docs
-│   ├── chunker.py           # Split documents
-│   ├── embedder.py          # Create embeddings
-│   ├── uploader.py          # Upload to Qdrant
-│   └── requirements.txt      # Python dependencies
+├── app/                        # Backend (Python/FastAPI)
+│   ├── main.py                # API server + RAG pipeline
+│   ├── scraper.py             # Scrape IITM BS Google Docs
+│   ├── chunker.py             # Split documents into chunks
+│   ├── embedder.py            # Generate Gemini embeddings
+│   ├── uploader.py            # Upload to Qdrant
+│   └── requirements.txt       # Python dependencies
 │
-├── frontend/                # Frontend (Next.js/React)
+├── frontend/                  # Frontend (Next.js/React)
 │   ├── app/
-│   │   └── page.tsx         # Chat interface
-│   ├── components/          # UI components
-│   └── package.json         # Node dependencies
+│   │   └── page.tsx           # Chat interface
+│   └── components/            # UI components
 │
-├── docker-compose.yml       # Docker config (runs containers)
-├── Dockerfile               # How to build backend container
-├── .env.example            # Template for API keys
-├── load_data.sh            # Automation for Mac/Linux
-├── load_data.bat           # Automation for Windows
-└── README.md               # This file
+├── .github/workflows/         # CI/CD
+│   └── deploy.yml             # Auto-deploy to Render on push
+│
+├── docker-compose.yml         # Docker config
+├── Dockerfile                 # Backend container build
+├── .env.example               # API key template
+├── load_data.sh               # Data pipeline (Mac/Linux)
+├── load_data.bat              # Data pipeline (Windows)
+└── README.md
 ```
 
 ---
@@ -314,34 +202,67 @@ iitm-bs-ds-student-assistant-rag/
 ## 🎯 Common Commands
 
 ```bash
-# Start everything
-docker-compose up -d
+# Start containers
+docker compose up -d
 
 # Check status
-docker-compose ps
+docker compose ps
 
 # View logs
-docker-compose logs backend
-docker-compose logs qdrant
+docker compose logs backend
+docker compose logs qdrant
 
-# Stop everything
-docker-compose down
+# Restart backend
+docker compose restart backend
 
-# Restart a service
-docker-compose restart backend
+# Stop containers
+docker compose down
+
+# Start frontend
+cd frontend && npm run dev
 
 # Load data (Mac/Linux)
 bash load_data.sh
 
 # Load data (Windows)
 load_data.bat
+```
 
-# Start frontend
-cd frontend && npm run dev
+---
 
-# Delete all data and restart
-docker-compose down -v
-docker-compose up -d
+## 🆘 Troubleshooting
+
+### Docker pull fails with EOF
+Pinned image versions are already set in `docker-compose.yml`. If you see EOF errors:
+- Add DNS to Docker Desktop → Settings → Docker Engine: `"dns": ["8.8.8.8", "8.8.4.4"]`
+- Avoid using `:latest` tags
+
+### Qdrant shows unhealthy
+The healthcheck uses a TCP check (no curl inside container). If still failing:
+```bash
+docker logs qdrant
+```
+
+### Backend shows unhealthy but app works
+```bash
+curl http://localhost:8000/health
+```
+If it returns JSON, the backend is fine — the Docker healthcheck is just a TCP port check.
+
+### Embedding fails after retries
+Gemini free tier quota (1000/day) exceeded. Wait 24 hours or use a new Google account's API key.
+
+### Frontend can't reach backend
+Make sure `frontend/.env.local` exists with:
+```
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+Then restart: `Ctrl+C` → `npm run dev`
+
+### New `.env` values not loading
+`docker compose restart` doesn't reload env. Use:
+```bash
+docker compose down && docker compose up -d
 ```
 
 ---
@@ -349,22 +270,21 @@ docker-compose up -d
 ## ✅ Success Checklist
 
 - [ ] Docker Desktop installed and running
-- [ ] Node.js installed (`node --version` works)
+- [ ] Node.js 22+ installed
 - [ ] Repository cloned
-- [ ] `.env` file created with your API keys
-- [ ] `docker-compose up -d` shows 2 containers up
-- [ ] `npm run dev` starts frontend at localhost:3000
-- [ ] `load_data.sh` (or `.bat`) runs without errors
-- [ ] Can ask questions and get answers at localhost:3000
+- [ ] `.env` created with API keys
+- [ ] `docker compose up -d` → both containers healthy
+- [ ] `load_data.sh` completed successfully
+- [ ] `frontend/.env.local` created
+- [ ] `npm run dev` running at localhost:3000
+- [ ] Questions answered correctly at localhost:3000
 
 ---
 
-## 📞 Need Help?
+## 📦 Version
 
-1. Check the logs: `docker-compose logs backend`
-2. Make sure Docker Desktop is running
-3. Verify `.env` has correct API keys
-4. Try restarting: `docker-compose restart backend
+**v1.0.0** — First stable local release
+
 ---
 
-**Happy coding! 🎉**
+**Happy learning! 🎉**

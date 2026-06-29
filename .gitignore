@@ -10,17 +10,15 @@ venv/
 
 # Environment variables
 .env
+.env.local
+frontend/.env.local
 
 # IDE settings
 .vscode/
 
 # Vector database storage
 qdrant_storage/
+storage/
 
-#app output
-
+# App output
 app/output/
-storage/
-storage/
-qdrant
-storage/
