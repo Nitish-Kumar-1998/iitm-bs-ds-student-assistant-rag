@@ -6,8 +6,9 @@ __pycache__/
 *.pyc
 
 # Virtual environment
-venv/
-
+.venv/
+app/scraper/data/
+app/ingest/data/
 # Environment variables
 .env
 .env.local
@@ -22,3 +23,4 @@ storage/
 
 # App output
 app/output/
+
