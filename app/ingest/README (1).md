@@ -96,11 +96,42 @@ Every chunk carries:
 
 ---
 
+## Hybrid search vectors
+
+Each point in Qdrant has two vectors:
+
+- **dense** — Gemini embedding (3072d, cosine similarity, semantic search)
+- **sparse** — TF-based keyword vector, built fresh in `uploader.py` from `embed_text`
+
+Sparse vectors are **not** stored in `chunks_embedded.json` — they are computed
+at upload time in `build_sparse_vector()` since they are cheap to generate
+and do not need to be persisted between stages.
+
+At query time, both vectors are searched and fused with RRF (Reciprocal Rank
+Fusion) in the `retrieve` stage, weighted by `VECTOR_WEIGHT` / `BM25_WEIGHT`.
+
+---
+
+## Important: uploader always rebuilds the collection
+
+`uploader.py` deletes the existing Qdrant collection and recreates it from
+scratch on every run (`setup_collection()`). This guarantees the collection
+always exactly mirrors your current `chunks_embedded.json` — no stale points
+left over from removed docs or sections.
+
+This means re-running ingest is **not incremental**. To add new documents,
+re-run the full pipeline from chunking onward — there is currently no way
+to upload only the newly added chunks.
+
+---
+
 ## Prerequisites
 
 1. Scraper must have run first: `python -m app.scraper.scraper`
-2. Qdrant must be running: `docker compose up -d`
-3. `.env` must have `GEMINI_API_KEY` set
+2. `.env` must have `GEMINI_API_KEY` set
+3. Qdrant mode is set via `QDRANT_MODE` in `.env`:
+   - `embedded` (default) — no setup needed, stores locally at `data/qdrant_local/`
+   - `server` — requires a running Qdrant instance (`docker compose up -d` or Qdrant Cloud), plus `QDRANT_URL` and `QDRANT_API_KEY`
 
 ---
 
@@ -110,13 +141,27 @@ If embedding is interrupted (network error, quota hit), re-run `embedder.py`.
 It will skip already-embedded chunks and continue from where it stopped.
 Progress is saved every 10 chunks to `data/embedding_progress.json`.
 
+Note: this resume support applies to **embedding only**. The uploader has
+no resume logic — it always does a full delete-and-reupload.
+
 ---
 
 ## Output files (gitignored)
-
-```
 data/
-├── chunks.json               # Stage 1 output — raw chunks
-├── chunks_embedded.json      # Stage 2 output — chunks + embeddings
-└── embedding_progress.json   # Resume checkpoint (deleted on success)
-```
+
+    ├── chunks.json               # Stage 1 output — raw chunks
+
+    ├── chunks_embedded.json      # Stage 2 output — chunks + embeddings
+
+    ├── embedding_progress.json   # Resume checkpoint (deleted on success)
+
+    └── qdrant_local/              # Embedded Qdrant storage (only if QDRANT_MODE=embedded)
+
+
+
+---
+
+## Verified working
+
+Last successful run: 914 chunks uploaded (`text: 734`, `table: 121`, `image: 59`),
+embedding dim 3072, smoke test top score 1.000.    
